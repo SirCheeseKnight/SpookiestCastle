@@ -718,12 +718,13 @@ protected:
       if (rockCol2.collidesWith(playerCol) || rockCol1.collidesWith(playerCol))
       {
         resetGame();
+	return;
       }
 
-      rockCol2.initSphere(rock2Pos.x, rock2Pos.y, rock2Pos.z, rockRadius*1.2f);
-      rockCol2.setWorldMatrix(glm::mat4(1.0f));
-      rockCol1.initSphere(rock1Pos.x, rock1Pos.y, rock1Pos.z, rockRadius*1.2f);
-      rockCol1.setWorldMatrix(glm::mat4(1.0f));
+      //      rockCol2.initSphere(rock2Pos.x, rock2Pos.y, rock2Pos.z, rockRadius*1.2f);
+      // rockCol2.setWorldMatrix(glm::mat4(1.0f));
+      // rockCol1.initSphere(rock1Pos.x, rock1Pos.y, rock1Pos.z, rockRadius*1.2f);
+      //rockCol1.setWorldMatrix(glm::mat4(1.0f));
 
       checkGraveCollisions(rockCol1);
 
@@ -771,6 +772,7 @@ protected:
           if (ghostCol.collidesWith(playerCol))
           {
             resetGame();
+	    return;
           }
 
           // 1. Check boundary conditions and flip direction/rotation
@@ -915,7 +917,9 @@ protected:
           hasPotion = true;
         }
         if (sightHit.objectId.find("ghost_auto_") == 0 && hasPotion == true) {
-          Instance &item = SC.TI[0].I[sightHit.index];
+	  int ghostIdNum = std::stoi(sightHit.objectId.substr(11));
+	  activeGhosts[ghostIdNum] = false;
+	  Instance &item = SC.TI[0].I[sightHit.index];
           item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
           item.C = nullptr;
         }
