@@ -305,6 +305,8 @@ protected:
       initialInstances[i].Wm = SC.TI[0].I[i].Wm;
       initialInstances[i].C  = SC.TI[0].I[i].C;
     }
+
+    changePrize("chair_good");
     
     // initializes the textual output
     txt.init(this, windowWidth, windowHeight);
@@ -315,6 +317,7 @@ protected:
     // Prepares for showing the FPS count
     txt.print(1.0f, 1.0f, "FPS:",1,"CO",false,false,true,TAL_RIGHT,TRH_RIGHT,TRV_BOTTOM,{1.0f,0.0f,0.0f,1.0f},{0.8f,0.8f,0.0f,1.0f});
     
+
   }
   
   // Here you create your pipelines and Descriptor Sets!
@@ -549,6 +552,7 @@ protected:
         SC.TI[0].I[i].C  = initialInstances[i].C;
       }
     }
+    changePrize("chair_good");
 
     // 6. Reset Rock Instance Matrices in Scene
     if (instanceIndexMap.count("rock1") && instanceIndexMap.count("rock2")) {
@@ -558,6 +562,30 @@ protected:
 
       SC.TI[0].I[idx1].Wm = glm::translate(glm::mat4(1.0f), rock1Pos) * scaleMat;
       SC.TI[0].I[idx2].Wm = glm::translate(glm::mat4(1.0f), rock2Pos) * scaleMat;
+    }
+  }
+
+  void changePrize(const std::string& prizeType) {
+    // 1. Define all possible prize IDs in your scene
+    std::vector<std::string> allPrizes = {"chair_bad", "chair_good", "treasure_chest"};
+
+    // 2. Loop through each prize to hide or show it
+    for (const std::string& currentPrize : allPrizes) {
+      if (instanceIndexMap.count(currentPrize)) {
+        int idx = instanceIndexMap[currentPrize];
+
+        if (currentPrize == prizeType) {
+          // SHOW: Restore original matrix and collider from your backup
+          if (idx < initialInstances.size()) {
+            SC.TI[0].I[idx].Wm = initialInstances[idx].Wm;
+            SC.TI[0].I[idx].C  = initialInstances[idx].C;
+          }
+        } else {
+          // HIDE: Shrink to 0 and remove collider
+          SC.TI[0].I[idx].Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
+          SC.TI[0].I[idx].C  = nullptr;
+        }
+      }
     }
   }
 
@@ -814,6 +842,19 @@ protected:
       }
     }
   }
+
+  bool areAllGhostsDefeated() {
+    if (!hasPotion)
+    {
+      return false;
+    }
+    for (bool isGhostActive : activeGhosts) {
+      if (isGhostActive) {
+        return false; // Found an active ghost, so they aren't all defeated
+      }
+    }
+    return true; // No active ghosts found
+  }
   
   float GameLogic() {
     const float FOVy = glm::radians(75.0f);
@@ -901,6 +942,16 @@ protected:
       }
     }
     }
+    if (camPos.y > 1000.0f && camPos.z < 0.0f)
+    {
+      if (!hasPotion || areAllGhostsDefeated()){
+        jumpImpulse = 18.0f;
+    }
+      else
+      {
+        resetGame();
+      }
+    }
 
     // 1. Calculate raycast (e.g., max 4.0 units away)
     float maxPickupDistance = 4.0f;
@@ -915,13 +966,18 @@ protected:
           item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
           item.C = nullptr;
           hasPotion = true;
+          changePrize("treasure_chest");
         }
         if (sightHit.objectId.find("ghost_auto_") == 0 && hasPotion == true) {
-	  int ghostIdNum = std::stoi(sightHit.objectId.substr(11));
-	  activeGhosts[ghostIdNum] = false;
-	  Instance &item = SC.TI[0].I[sightHit.index];
+          int ghostIdNum = std::stoi(sightHit.objectId.substr(11));
+          activeGhosts[ghostIdNum] = false;
+          Instance &item = SC.TI[0].I[sightHit.index];
           item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
           item.C = nullptr;
+          if (areAllGhostsDefeated())
+          {
+            changePrize("chair_bad");
+          }
         }
       }
     }
