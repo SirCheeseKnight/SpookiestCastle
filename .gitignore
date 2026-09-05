@@ -1,0 +1,13 @@
+# Local build outputs
+/build/
+/build-win/
+
+# IDE and operating-system files
+/.vs/
+*.user
+*.suo
+.DS_Store
+*~
+
+# Generated at runtime from the base scene
+/source/assets/scenes/scene_generated.json
