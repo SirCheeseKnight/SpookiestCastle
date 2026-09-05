@@ -17,17 +17,28 @@
 struct UniformBufferObject {
   alignas(16) glm::mat4 mvpMat;
   alignas(16) glm::mat4 mMat;
+  alignas(16) glm::mat4 normalMat;
+  // x: world-space texture scale, y: enable planar tiling
+  alignas(16) glm::vec4 surfaceParams;
 };
 
 struct GlobalUniformBufferObject {
   alignas(16) glm::vec3 lightDir;
   alignas(16) glm::vec4 lightColor;
   alignas(16) glm::vec3 eyePos;
+  alignas(16) glm::vec4 pointLightPos[6];
+  alignas(16) glm::vec4 pointLightColor[6];
 };
 
 struct Vertex {
   glm::vec3 pos;
+  glm::vec3 normal;
   glm::vec2 UV;
+};
+
+struct SkyUniformBufferObject {
+  alignas(16) glm::mat4 inverseViewProjection;
+  alignas(16) glm::vec2 resolution;
 };
 
 // MAIN !
@@ -37,15 +48,15 @@ protected:
   // Here you list all the Vulkan objects you need:
   
   // Descriptor Layouts [what will be passed to the shaders]
-  DescriptorSetLayout DSLlocal, DSLglobal;
+  DescriptorSetLayout DSLlocal, DSLglobal, DSLsky;
   
   // Vertex formants, Pipelines [Shader couples] and Render passes
-  VertexDescriptor VD;
+  VertexDescriptor VD, VDsky;
   RenderPass RP;
-  Pipeline P;
+  Pipeline P, Psky;
   
   // Models, textures and Descriptors (values assigned to the uniforms)
-  DescriptorSet DSglobal;
+  DescriptorSet DSglobal, DSsky;
   
   // To support loading assets from a scene.json file
   Scene SC;
@@ -62,9 +73,9 @@ protected:
   glm::mat4 View;
 
   // Add these lines to keep track of camera state:
-  glm::vec3 camPos = glm::vec3(20.0f, 2.5f, 20.0f); // Initial spawn position
-  float camYaw = 0.0f;                             // Horizontal look angle
-  float camPitch = 0.0f;                           // Vertical look angle
+  glm::vec3 camPos = glm::vec3(0.0f, 2.5f, 80.0f); // In front of the castle
+  float camYaw = glm::radians(180.0f);              // Look toward the castle (-Z)
+  float camPitch = glm::radians(-10.0f);            // Include the castle and sky
   // Rock physics state
   glm::vec3 rock1Pos = glm::vec3(115.0f, 1080.0f, 10.0f);
   glm::vec3 rock2Pos = glm::vec3(90.0f, 1080.0f, 10.0f);
@@ -72,7 +83,6 @@ protected:
   float rock2VelY = 0.0f;
   bool rock1Grounded = false;
   bool rock2Grounded = false;
-  const float ghostRadius = 0.7f;
   float rock1Angle = 0.0f;
   float rock2Angle = 0.0f;
   float velocity_y = 0;
@@ -83,18 +93,25 @@ protected:
   int graveIdCounter = 0;
   bool rockStart = false;
   bool rockStop = false;
-  bool hasPotion = false;
   std::vector<float> ghostDirections;
-  std::vector<bool> activeGhosts;
-
-  // Initial States
-  struct InitialInstanceState {
-    glm::mat4 Wm;
-    Collider* C;
-  };
-  std::vector<InitialInstanceState> initialInstances;
   std::vector<float> initialGhostDirections;
+  std::vector<bool> activeGhosts;
+  std::vector<bool> brokenGraves;
+  std::vector<bool> collisionDisabled;
+  std::vector<glm::mat4> initialGraveTransforms;
+  std::vector<glm::mat4> initialBrokenGraveTransforms;
+  std::vector<glm::mat4> initialGhostTransforms;
 
+  enum class GameState { Playing, Won, Lost };
+  GameState gameState = GameState::Playing;
+  bool hasPotion = false;
+  bool potionAvailable = true;
+  bool potionTransformSaved = false;
+  bool fireWasPressed = false;
+  bool replayWasPressed = false;
+  int remainingGhosts = 0;
+  int spawnedGhosts = 0;
+  glm::mat4 initialPotionTransform = glm::mat4(1.0f);
 
   // Maps string ID -> array index inside SC.TI[0].I
   std::unordered_map<std::string, int> instanceIndexMap;
@@ -140,7 +157,7 @@ protected:
 	// first  element : the binding number
 	// second element : the type of element (buffer or texture)
 	// third  element : the pipeline stage where it will be used
-	{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, sizeof(UniformBufferObject), 1},
+	{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_ALL_GRAPHICS, sizeof(UniformBufferObject), 1},
 	{1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 1}
       });
     DSLglobal.init(this, {
@@ -150,19 +167,27 @@ protected:
 	// third  element : the pipeline stage where it will be used
 	{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_ALL_GRAPHICS, sizeof(GlobalUniformBufferObject), 1}
       });
+    DSLsky.init(this, {
+	{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(SkyUniformBufferObject), 1}
+      });
     VD.init(this, {
 	{0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX}
       }, {
 	{0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos),
 	 sizeof(glm::vec3), POSITION},
-	{0, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, UV),
+	{0, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal),
+	 sizeof(glm::vec3), NORMAL},
+	{0, 2, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, UV),
 	 sizeof(glm::vec2), UV}
       });
+
+    // The sky uses gl_VertexIndex, so it needs no vertex buffer or attributes.
+    VDsky.init(this, {}, {});
     
     // initializes the render passes
     RP.init(this);
-    // sets the blue sky
-    RP.properties[0].clearValue = {0.0f,0.3f,0.33f,0.33f};
+    // Dark fallback color underneath the rendered night sky.
+    RP.properties[0].clearValue = {0.003f, 0.006f, 0.02f, 1.0f};
 
     
     // Pipelines [Shader couples]
@@ -172,12 +197,17 @@ protected:
     P.init(this, &VD, "shaders/toChangeSimplePos.vert.spv",
 	   "shaders/toChangeBlinnFromPos.frag.spv",
 	   {&DSLglobal, &DSLlocal});
+
+    Psky.init(this, &VDsky, "shaders/nightSky.vert.spv",
+	     "shaders/nightSky.frag.spv", {&DSLsky});
+    Psky.setCullMode(VK_CULL_MODE_NONE);
+    Psky.setCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
     
     
     // sets the size of the Descriptor Set Pool (it MUST be done before loading the scene)
-    DPSZs.uniformBlocksInPool = 2;
+    DPSZs.uniformBlocksInPool = 3;
     DPSZs.texturesInPool = 1;
-    DPSZs.setsInPool = 2;
+    DPSZs.setsInPool = 3;
     
     // to support scene
     VDRs.resize(1);
@@ -197,10 +227,10 @@ protected:
     // 1. Setup Random Number Generators
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> numGravesDist(2, 3);
-    std::uniform_real_distribution<float> xPosDist0(80.0f, 94.0f);
-    std::uniform_real_distribution<float> xPosDist2(95.0f, 109.0f);
-    std::uniform_real_distribution<float> xPosDist1(110.0f, 124.0f);
+    std::uniform_int_distribution<> numGravesDist(1, 3);
+    std::uniform_real_distribution<float> xPosDist0(80.0f, 90.0f);
+    std::uniform_real_distribution<float> xPosDist2(95.0f, 105.0f);
+    std::uniform_real_distribution<float> xPosDist1(110.0f, 120.0f);
     std::uniform_real_distribution<float> yRotDist(-45.0f, 45.0f);
 
     // 2. Load the base scene JSON
@@ -217,11 +247,10 @@ protected:
       float currentY = 1036.5f + (1.33f * step);
       float currentZ = 60.33f - (1.66f * step);
       float randomX = 0.0f;
-      int graveID = graveIdCounter++;
-
       int gravesOnThisStep = numGravesDist(gen);
 
       for (int g = 0; g < gravesOnThisStep; ++g) {
+        int graveID = graveIdCounter++;
         if (g==0)
         {
            randomX = xPosDist0(gen);
@@ -298,15 +327,26 @@ protected:
       exit(0);
     }
 
+    brokenGraves.assign(graveIdCounter, false);
     initialGhostDirections = ghostDirections;
+    collisionDisabled.assign(SC.TI[0].InstanceCount, false);
+    initialGraveTransforms.resize(graveIdCounter);
+    initialBrokenGraveTransforms.resize(graveIdCounter);
+    initialGhostTransforms.resize(graveIdCounter);
 
-    initialInstances.resize(SC.TI[0].InstanceCount);
-    for (int i = 0; i < SC.TI[0].InstanceCount; ++i) {
-      initialInstances[i].Wm = SC.TI[0].I[i].Wm;
-      initialInstances[i].C  = SC.TI[0].I[i].C;
+    for (int i = 0; i < graveIdCounter; ++i) {
+      int graveIdx = instanceIndexMap["grave_auto_" + std::to_string(i)];
+      int brokenIdx = instanceIndexMap["broken_grave_auto_" + std::to_string(i)];
+      int ghostIdx = instanceIndexMap["ghost_auto_" + std::to_string(i)];
+      initialGraveTransforms[i] = SC.TI[0].I[graveIdx].Wm;
+      initialBrokenGraveTransforms[i] = SC.TI[0].I[brokenIdx].Wm;
+      initialGhostTransforms[i] = SC.TI[0].I[ghostIdx].Wm;
     }
 
-    changePrize("chair_good");
+    if (instanceIndexMap.count("hidden_room_potion")) {
+      initialPotionTransform = SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].Wm;
+      potionTransformSaved = true;
+    }
     
     // initializes the textual output
     txt.init(this, windowWidth, windowHeight);
@@ -317,7 +357,6 @@ protected:
     // Prepares for showing the FPS count
     txt.print(1.0f, 1.0f, "FPS:",1,"CO",false,false,true,TAL_RIGHT,TRH_RIGHT,TRV_BOTTOM,{1.0f,0.0f,0.0f,1.0f},{0.8f,0.8f,0.0f,1.0f});
     
-
   }
   
   // Here you create your pipelines and Descriptor Sets!
@@ -327,8 +366,10 @@ protected:
     
     // This creates a new pipeline (with the current surface), using its shaders for the provided render pass
     P.create(&RP);
+    Psky.create(&RP);
     
     DSglobal.init(this, &DSLglobal, {});
+    DSsky.init(this, &DSLsky, {});
     
     // Here you define the data set
     // If the scene has textures coming from a render pass, the corresponding element of the technique must be
@@ -341,10 +382,12 @@ protected:
   // Here you destroy your pipelines and Descriptor Sets!
   void pipelinesAndDescriptorSetsCleanup() {
     P.cleanup();
+    Psky.cleanup();
     
     RP.cleanup();
     
     DSglobal.cleanup();
+    DSsky.cleanup();
     
     SC.pipelinesAndDescriptorSetsCleanup();
     txt.pipelinesAndDescriptorSetsCleanup();
@@ -355,8 +398,11 @@ protected:
   void localCleanup() {
     DSLlocal.cleanup();
     DSLglobal.cleanup();
+    DSLsky.cleanup();
     
     P.destroy();
+    Psky.destroy();
+    VDsky.cleanup();
     
     RP.destroy();
     
@@ -380,6 +426,11 @@ protected:
     // Offscreen pass - always required
     // begin standard pass
     RP.begin(commandBuffer, currentImage);
+
+    // Draw the background first at the far depth. Scene geometry then covers it.
+    Psky.bind(commandBuffer);
+    DSsky.bind(commandBuffer, Psky, 0, currentImage);
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     
     SC.populateCommandBuffer(commandBuffer, 0, currentImage);
     
@@ -399,6 +450,15 @@ protected:
     
     // moves the view
     float deltaT = GameLogic();
+
+    // Remove camera translation before inverting the sky view-projection matrix.
+    // This keeps celestial directions fixed while allowing the camera to rotate.
+    const glm::mat4 projection = ViewPrj * glm::inverse(View);
+    const glm::mat4 viewRotation = glm::mat4(glm::mat3(View));
+    SkyUniformBufferObject skyUbo{};
+    skyUbo.inverseViewProjection = glm::inverse(projection * viewRotation);
+    skyUbo.resolution = glm::vec2(static_cast<float>(RP.width), static_cast<float>(RP.height));
+    DSsky.map(currentImage, &skyUbo, 0);
     
     // defines the global parameters for the uniform
     static float lightRotationAngle = 0.0f; // Static variable to keep track of rotation
@@ -411,19 +471,49 @@ protected:
     GlobalUniformBufferObject gubo{};
     
     gubo.lightDir = lightDir;
-    gubo.lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)*5.0f;
+    gubo.lightColor = glm::vec4(0.55f, 0.68f, 1.0f, 1.0f) * 0.85f;
     gubo.eyePos = glm::vec3(glm::inverse(View)[3]);
+
+    gubo.pointLightPos[0] = glm::vec4(79.0f, 1024.0f, 85.0f, 1.0f);
+    gubo.pointLightPos[1] = glm::vec4(125.0f, 1040.0f, 75.0f, 1.0f);
+    gubo.pointLightPos[2] = glm::vec4(79.0f, 1056.0f, 45.0f, 1.0f);
+    gubo.pointLightPos[3] = glm::vec4(125.0f, 1072.0f, 25.0f, 1.0f);
+    for (int i = 0; i < 4; ++i) {
+      gubo.pointLightColor[i] = glm::vec4(4.0f, 1.8f, 0.6f, 1.0f);
+    }
+    gubo.pointLightPos[4] = glm::vec4(-2.5f, 4.5f, 18.0f, 1.0f);
+    gubo.pointLightPos[5] = glm::vec4( 2.5f, 4.5f, 18.0f, 1.0f);
+    gubo.pointLightColor[4] = glm::vec4(2.8f, 1.1f, 0.35f, 1.0f);
+    gubo.pointLightColor[5] = glm::vec4(2.8f, 1.1f, 0.35f, 1.0f);
     
     DSglobal.map(currentImage, &gubo, 0);
     
     // defines the local parameters for the uniforms
     UniformBufferObject ubo{};		
+    const int wallModelId = SC.MeshIds["wall"];
+    const int stairModelId = SC.MeshIds["stair"];
+    const int floorModelId = SC.MeshIds["floor"];
+    const int exteriorPathModelId = SC.MeshIds["exterior_path"];
+    const int exteriorStoneModelId = SC.MeshIds["exterior_stone_block"];
     
     int instanceId;
     // character
     for(instanceId = 0; instanceId < SC.TI[0].InstanceCount; instanceId++) {
       ubo.mMat = SC.TI[0].I[instanceId].Wm;
       ubo.mvpMat = ViewPrj * ubo.mMat;
+      float worldDeterminant = glm::determinant(ubo.mMat);
+      ubo.normalMat = glm::abs(worldDeterminant) > 0.000001f
+          ? glm::transpose(glm::inverse(ubo.mMat))
+          : glm::mat4(1.0f);
+      bool tiledSurface = SC.TI[0].I[instanceId].Mid == wallModelId ||
+                          SC.TI[0].I[instanceId].Mid == stairModelId ||
+                          SC.TI[0].I[instanceId].Mid == floorModelId ||
+                          SC.TI[0].I[instanceId].Mid == exteriorPathModelId ||
+                          SC.TI[0].I[instanceId].Mid == exteriorStoneModelId;
+      const float albedoScale = SC.TI[0].I[instanceId].Mid == exteriorPathModelId
+          ? 0.62f
+          : 1.0f;
+      ubo.surfaceParams = glm::vec4(0.12f, tiledSurface ? 1.0f : 0.0f, albedoScale, 0.0f);
       
       // DS[1] = Pchar pass (main render): set0=DSLglobal, set1=DSLlocal
       SC.TI[0].I[instanceId].DS[0][0]->map(currentImage, &gubo, 0); // global (light/camera)
@@ -444,6 +534,11 @@ protected:
       oss << "Player X: " << camPos.x << "\n";
       oss << "Player Y: " << camPos.y << "\n";
       oss << "Player Z: " << camPos.z << "\n";
+      if (gameState == GameState::Playing && hasPotion) {
+        oss << "Potion acquired - Ghosts remaining: " << remainingGhosts << "\n";
+      } else if (gameState == GameState::Playing) {
+        oss << "Find the potion\n";
+      }
       
       txt.print(1.0f, 1.0f, oss.str(), 1, "CO", false, false, true,TAL_RIGHT,TRH_RIGHT,TRV_BOTTOM,{1.0f,0.0f,0.0f,1.0f},{0.8f,0.8f,0.0f,1.0f});
       
@@ -454,81 +549,13 @@ protected:
     txt.updateCommandBuffer();
   }
 
-  struct RaycastHit {
-    bool hit = false;
-    float distance = 0.0f;
-    std::string objectId = "";
-    int index = -1;
-  };
-
-  RaycastHit getObjectInSight(glm::vec3 origin, glm::vec3 direction, float maxDistance) {
-    RaycastHit result;
-    const float stepSize = 0.2f; // Distance to move forward each check
-
-    // Step forward along the view direction
-    for (float dist = 0.0f; dist <= maxDistance; dist += stepSize) {
-      glm::vec3 checkPos = origin + (direction * dist);
-
-      // Create a tiny collider at the current point on the ray
-      Collider rayPoint;
-      rayPoint.initSphere(checkPos.x, checkPos.y, checkPos.z, 0.1f);
-      rayPoint.setWorldMatrix(glm::mat4(1.0f));
-
-      // Test this point against all objects in the scene
-      for (int t = 0; t < SC.TechniqueInstanceCount; t++) {
-        for (int i = 0; i < SC.TI[t].InstanceCount; i++) {
-          Instance &inst = SC.TI[t].I[i];
-
-          if (inst.C != nullptr && rayPoint.collidesWith(*(inst.C))) {
-            result.hit = true;
-            result.distance = dist;
-            result.index = i;
-
-            // Look up the string ID
-            for (const auto& [id, mappedIdx] : instanceIndexMap) {
-              if (mappedIdx == i) {
-                result.objectId = id;
-                break;
-              }
-            }
-            return result; // Return immediately on the first hit
-          }
-        }
-      }
-      for (int i = 0; i < graveIdCounter; ++i) {
-        if (i < activeGhosts.size() && activeGhosts[i]) {
-          std::string ghostId = "ghost_auto_" + std::to_string(i);
-          if (instanceIndexMap.count(ghostId)) {
-            int ghostIdx = instanceIndexMap[ghostId];
-            Instance &ghost = SC.TI[0].I[ghostIdx];
-
-            glm::vec3 pos = glm::vec3(ghost.Wm[3]);
-            Collider ghostCol;
-            ghostCol.initSphere(pos.x, pos.y, pos.z, ghostRadius);
-
-            if (ghostCol.collidesWith(rayPoint))
-            {
-              result.hit = true;
-              result.distance = dist;
-              result.index = ghostIdx;
-              result.objectId = ghostId;
-              return result;
-            }
-          }
-        }
-      }
-    }
-    return result;
-  }
-
   void resetGame() {
     // 1. Reset Camera / Player state
-    camPos = glm::vec3(20.0f, 2.5f, 20.0f);
-    camYaw = 0.0f;
-    camPitch = 0.0f;
+    camPos = glm::vec3(0.0f, 2.5f, 80.0f);
+    camYaw = glm::radians(180.0f);
+    camPitch = glm::radians(-10.0f);
     velocity_y = 0.0f;
     isGrounded = false;
-    hasPotion = false;
 
     // 2. Reset Rock physics and states
     rock1Pos = glm::vec3(115.0f, 1080.0f, 10.0f);
@@ -540,19 +567,51 @@ protected:
     rock1Angle = 0.0f;
     rock2Angle = 0.0f;
     rockStart = false;
+    rockStop = false;
+    gameState = GameState::Playing;
+    hasPotion = false;
+    potionAvailable = true;
+    fireWasPressed = false;
+    remainingGhosts = 0;
+    spawnedGhosts = 0;
+    txt.removeText(2);
 
-    // 3. Reset Ghost tracking states
+    // 3. Reset Active Ghosts vector
     std::fill(activeGhosts.begin(), activeGhosts.end(), false);
+    std::fill(brokenGraves.begin(), brokenGraves.end(), false);
+    std::fill(collisionDisabled.begin(), collisionDisabled.end(), false);
     ghostDirections = initialGhostDirections;
 
-    // 4. Restore ALL Scene Instances (Matrices & Colliders) to starting state
-    for (int i = 0; i < SC.TI[0].InstanceCount; ++i) {
-      if (i < initialInstances.size()) {
-        SC.TI[0].I[i].Wm = initialInstances[i].Wm;
-        SC.TI[0].I[i].C  = initialInstances[i].C;
-      }
+    // 4. Reset Ghost Directions if you added direction tracking
+    // std::fill(ghostDirections.begin(), ghostDirections.end(), 1.0f);
+
+    // 5. Restore Grave, Broken Grave, and Ghost World Matrices
+    for (int i = 0; i < graveIdCounter; ++i) {
+      std::string graveId  = "grave_auto_" + std::to_string(i);
+      std::string brokenId = "broken_grave_auto_" + std::to_string(i);
+      std::string ghostId  = "ghost_auto_" + std::to_string(i);
+
+      if (instanceIndexMap.count(graveId) &&
+        instanceIndexMap.count(brokenId) &&
+        instanceIndexMap.count(ghostId)) {
+
+        int mainIdx   = instanceIndexMap[graveId];
+      int brokenIdx = instanceIndexMap[brokenId];
+      int ghostIdx  = instanceIndexMap[ghostId];
+
+      Instance &mainGrave   = SC.TI[0].I[mainIdx];
+      Instance &brokenGrave = SC.TI[0].I[brokenIdx];
+      Instance &ghost       = SC.TI[0].I[ghostIdx];
+
+      mainGrave.Wm = initialGraveTransforms[i];
+      brokenGrave.Wm = initialBrokenGraveTransforms[i];
+      ghost.Wm = initialGhostTransforms[i];
+        }
     }
-    changePrize("chair_good");
+
+    if (potionTransformSaved && instanceIndexMap.count("hidden_room_potion")) {
+      SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].Wm = initialPotionTransform;
+    }
 
     // 6. Reset Rock Instance Matrices in Scene
     if (instanceIndexMap.count("rock1") && instanceIndexMap.count("rock2")) {
@@ -565,34 +624,14 @@ protected:
     }
   }
 
-  void changePrize(const std::string& prizeType) {
-    // 1. Define all possible prize IDs in your scene
-    std::vector<std::string> allPrizes = {"chair_bad", "chair_good", "treasure_chest"};
-
-    // 2. Loop through each prize to hide or show it
-    for (const std::string& currentPrize : allPrizes) {
-      if (instanceIndexMap.count(currentPrize)) {
-        int idx = instanceIndexMap[currentPrize];
-
-        if (currentPrize == prizeType) {
-          // SHOW: Restore original matrix and collider from your backup
-          if (idx < initialInstances.size()) {
-            SC.TI[0].I[idx].Wm = initialInstances[idx].Wm;
-            SC.TI[0].I[idx].C  = initialInstances[idx].C;
-          }
-        } else {
-          // HIDE: Shrink to 0 and remove collider
-          SC.TI[0].I[idx].Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
-          SC.TI[0].I[idx].C  = nullptr;
-        }
-      }
-    }
-  }
-
   bool checkSceneCollision(Collider &playerCol) {
     for (int t = 0; t < SC.TechniqueInstanceCount; t++) {
       for (int i = 0; i < SC.TI[t].InstanceCount; i++) {
 	Instance &inst = SC.TI[t].I[i];
+
+	if (t == 0 && i < collisionDisabled.size() && collisionDisabled[i]) {
+	  continue;
+	}
 
 	if (inst.C != nullptr) {
 	  if (playerCol.collidesWith(*(inst.C))) {
@@ -633,8 +672,8 @@ protected:
 
   void checkGraveCollisions(Collider &rockCol) {
     for (int i = 0; i < graveIdCounter; ++i) {
-      // Skip if this grave index was already broken
-      if (i < activeGhosts.size() && activeGhosts[i]) continue;
+      // Skip graves that have already been broken.
+      if (i < brokenGraves.size() && brokenGraves[i]) continue;
 
       std::string graveId  = "grave_auto_" + std::to_string(i);
       std::string brokenId = "broken_grave_auto_" + std::to_string(i);
@@ -648,20 +687,21 @@ protected:
         Instance &mainGrave = SC.TI[0].I[mainIdx];
 
         if (mainGrave.C != nullptr && rockCol.collidesWith(*(mainGrave.C))) {
-          // Mark active
-          if (i < activeGhosts.size()) activeGhosts[i] = true;
+          brokenGraves[i] = true;
+          activeGhosts[i] = true;
+          remainingGhosts++;
+          spawnedGhosts++;
 
           // Hide original grave
           mainGrave.Wm = glm::scale(mainGrave.Wm, glm::vec3(0.0f));
-          // Nullify collider so player collision checks instantly ignore it
-          mainGrave.C = nullptr;
+          collisionDisabled[mainIdx] = true;
 
           // Reveal broken grave & ghost
           Instance &brokenGrave = SC.TI[0].I[brokenIdx];
-          brokenGrave.Wm = glm::scale(brokenGrave.Wm, glm::vec3(1500.0f));
+          brokenGrave.Wm = glm::scale(initialBrokenGraveTransforms[i], glm::vec3(1500.0f));
 
           Instance &ghost = SC.TI[0].I[ghostIdx];
-          ghost.Wm = glm::scale(ghost.Wm, glm::vec3(1500.0f));
+          ghost.Wm = glm::scale(initialGhostTransforms[i], glm::vec3(1500.0f));
         }
       }
     }
@@ -695,6 +735,8 @@ protected:
         rock1Grounded = false;
       }
 
+      checkGraveCollisions(rockCol1);
+
       if (instanceIndexMap.find("wall_B") != instanceIndexMap.end())
       {
         if (rockCol1.collidesWith(*((SC.TI[0].I[instanceIndexMap["wall_B"]].C))))
@@ -704,7 +746,7 @@ protected:
         else
         {
           rock1Angle += deltaT * 0.2f * rock1Speed;
-          rock1Angle = std::fmod(rock2Angle, 2.0f * glm::pi<float>());
+          rock1Angle = std::fmod(rock1Angle, 2.0f * glm::pi<float>());
         }
       }
 
@@ -746,15 +788,7 @@ protected:
       if (rockCol2.collidesWith(playerCol) || rockCol1.collidesWith(playerCol))
       {
         resetGame();
-	return;
       }
-
-      //      rockCol2.initSphere(rock2Pos.x, rock2Pos.y, rock2Pos.z, rockRadius*1.2f);
-      // rockCol2.setWorldMatrix(glm::mat4(1.0f));
-      // rockCol1.initSphere(rock1Pos.x, rock1Pos.y, rock1Pos.z, rockRadius*1.2f);
-      //rockCol1.setWorldMatrix(glm::mat4(1.0f));
-
-      checkGraveCollisions(rockCol1);
 
       checkGraveCollisions(rockCol2);
 
@@ -778,9 +812,8 @@ protected:
   }
 
   void ghostLogic(float deltaT) {
-    const float ghostSpeed = 9.0f; // Movement speed units/sec
-    const float ghostPosMax = 126.5f;
-    const float ghostPosMin = 77.5f;
+    const float ghostSpeed = 6.0f; // Movement speed units/sec
+    const float ghostRadius = 0.7f;
 
     for (int i = 0; i < graveIdCounter; ++i) {
       if (i < activeGhosts.size() && activeGhosts[i]) {
@@ -800,33 +833,32 @@ protected:
           if (ghostCol.collidesWith(playerCol))
           {
             resetGame();
-	    return;
           }
 
           // 1. Check boundary conditions and flip direction/rotation
-          if (ghostDirections[i] < 0.0f && pos.x <= ghostPosMin) {
+          if (ghostDirections[i] < 0.0f && pos.x <= 80.0f) {
             ghostDirections[i] = 1.0f; // Turn around to move right (+X)
-          } else if (ghostDirections[i] > 0.0f && pos.x >= ghostPosMax) {
+          } else if (ghostDirections[i] > 0.0f && pos.x >= 125.0f) {
             ghostDirections[i] = -1.0f; // Turn around to move left (-X)
           }
 
           float targetYaw = (ghostDirections[i] < 0.0f) ? glm::radians(-90.0f) : glm::radians(90.0f);
 
-          if (pos.x <= ghostPosMin + 5.0f)
+          if (pos.x <= 85.0f)
           {
             if (ghostDirections[i] < 0.0f)
             {
-              targetYaw = glm::radians(-90.0f + (ghostPosMin + 5.0f - pos.x) * 180.0f / 5.0f);
+              targetYaw = glm::radians(-90.0f + (85.0f - pos.x) * 180.0f / 5.0f);
             }
-            pos.x += ghostDirections[i] * ghostSpeed * (pos.x - ghostPosMin + 0.1f) / 5.1f * deltaT;
+            pos.x += ghostDirections[i] * ghostSpeed * (pos.x - 79.0f) / 6.0f * deltaT;
           }
-          else if (pos.x >= ghostPosMax - 5.0f)
+          else if (pos.x >= 120.0f)
           {
             if (ghostDirections[i] > 0.0f)
             {
-              targetYaw = glm::radians(90.0f - (pos.x - ghostPosMax + 5.0f) * 180.0f / 5.0f);
+              targetYaw = glm::radians(90.0f - (pos.x - 120.0f) * 180.0f / 5.0f);
             }
-            pos.x += ghostDirections[i] * ghostSpeed * (ghostPosMax + 0.1f - pos.x) / 5.1f * deltaT;
+            pos.x += ghostDirections[i] * ghostSpeed * (126.0f - pos.x) / 6.0f * deltaT;
           }
           else
           {
@@ -843,17 +875,86 @@ protected:
     }
   }
 
-  bool areAllGhostsDefeated() {
-    if (!hasPotion)
-    {
-      return false;
+  void handleInteraction(bool fire, const glm::vec3 &forward) {
+    bool firePressed = fire && !fireWasPressed;
+    fireWasPressed = fire;
+    if (!firePressed) {
+      return;
     }
-    for (bool isGhostActive : activeGhosts) {
-      if (isGhostActive) {
-        return false; // Found an active ghost, so they aren't all defeated
+
+    if (potionAvailable && instanceIndexMap.count("hidden_room_potion")) {
+      int potionIdx = instanceIndexMap["hidden_room_potion"];
+      glm::vec3 potionPos = glm::vec3(SC.TI[0].I[potionIdx].Wm[3]);
+      if (glm::length(potionPos - camPos) <= 4.0f) {
+        hasPotion = true;
+        potionAvailable = false;
+        SC.TI[0].I[potionIdx].Wm = glm::scale(initialPotionTransform, glm::vec3(0.0f));
+        collisionDisabled[potionIdx] = true;
+        return;
       }
     }
-    return true; // No active ghosts found
+
+    if (!hasPotion) {
+      return;
+    }
+
+    int targetGhost = -1;
+    float closestDistance = 5.0f;
+    glm::vec3 viewDirection = glm::normalize(forward);
+
+    for (int i = 0; i < graveIdCounter; ++i) {
+      if (!activeGhosts[i]) {
+        continue;
+      }
+
+      int ghostIdx = instanceIndexMap["ghost_auto_" + std::to_string(i)];
+      glm::vec3 ghostPos = glm::vec3(SC.TI[0].I[ghostIdx].Wm[3]);
+      glm::vec3 toGhost = ghostPos - camPos;
+      float distance = glm::length(toGhost);
+
+      if (distance > 0.0f && distance <= closestDistance &&
+          glm::dot(glm::normalize(toGhost), viewDirection) >= 0.8f) {
+        closestDistance = distance;
+        targetGhost = i;
+      }
+    }
+
+    if (targetGhost >= 0) {
+      int ghostIdx = instanceIndexMap["ghost_auto_" + std::to_string(targetGhost)];
+      SC.TI[0].I[ghostIdx].Wm =
+          glm::scale(initialGhostTransforms[targetGhost], glm::vec3(0.0f));
+      activeGhosts[targetGhost] = false;
+      remainingGhosts--;
+    }
+  }
+
+  void checkEndCondition() {
+    const bool reachedTop = camPos.y >= 1065.0f && camPos.z <= 0.0f;
+    if (!reachedTop) {
+      return;
+    }
+
+    // Without the potion, surviving the ghosts and reaching the top is enough.
+    // After drinking the potion, every spawned ghost must have been defeated.
+    if (!hasPotion || remainingGhosts == 0) {
+      gameState = GameState::Won;
+    } else {
+      gameState = GameState::Lost;
+    }
+
+    std::string result = gameState == GameState::Won ? "YOU WIN" : "YOU LOSE";
+    glm::vec4 resultColor = gameState == GameState::Won
+        ? glm::vec4(0.25f, 1.0f, 0.35f, 1.0f)
+        : glm::vec4(1.0f, 0.2f, 0.2f, 1.0f);
+    txt.print(0.0f, 0.0f,
+              "====================\n" + result +
+              "\n\n[ REPLAY ]\nPress R or ENTER\n====================",
+              2, "SS", false, true, false,
+              TAL_CENTER, TRH_CENTER, TRV_MIDDLE,
+              resultColor,
+              glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
+              glm::vec4(0.0f, 0.0f, 0.0f, 0.8f),
+              2.0f, 2.0f);
   }
   
   float GameLogic() {
@@ -865,6 +966,20 @@ protected:
     glm::vec3 m = glm::vec3(0.0f), r = glm::vec3(0.0f);
     bool fire = false;
     getSixAxis(deltaT, m, r, fire);
+
+    bool replayPressed =
+        glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS;
+
+    if (gameState != GameState::Playing) {
+      if (replayPressed && !replayWasPressed) {
+        resetGame();
+      }
+      replayWasPressed = replayPressed;
+      fireWasPressed = fire;
+      return deltaT;
+    }
+    replayWasPressed = replayPressed;
     
     const float moveSpeed = 8.0f;   
     const float rotateSpeed = 25.5f;
@@ -886,7 +1001,8 @@ protected:
     if (isCrouching) {
       frameAccumulator += deltaT;
       if (frameAccumulator >= timePerFrame) {
-	if (currentFrame < jumpCurve.size()/2 || m.y > -0.1f) {
+	if ((currentFrame < jumpCurve.size()/2 || m.y > -0.1f) &&
+	    currentFrame + 1 < jumpCurve.size()) {
 	  currentFrame++;
 	}
 	frameAccumulator = 0.0f;
@@ -941,45 +1057,6 @@ protected:
         SC.TI[0].I[idx2].Wm = glm::translate(glm::mat4(1.0f), rock2Pos) * scaleMat;
       }
     }
-    }
-    if (camPos.y > 1000.0f && camPos.z < 0.0f)
-    {
-      if (!hasPotion || areAllGhostsDefeated()){
-        jumpImpulse = 18.0f;
-    }
-      else
-      {
-        resetGame();
-      }
-    }
-
-    // 1. Calculate raycast (e.g., max 4.0 units away)
-    float maxPickupDistance = 4.0f;
-    RaycastHit sightHit = getObjectInSight(camPos, forward, maxPickupDistance);
-
-    // 2. Handle interaction if an object is within reach
-    if (sightHit.hit) {
-
-      if (fire) {
-        if (sightHit.objectId.find("hidden_room_potion") == 0) {
-          Instance &item = SC.TI[0].I[sightHit.index];
-          item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
-          item.C = nullptr;
-          hasPotion = true;
-          changePrize("treasure_chest");
-        }
-        if (sightHit.objectId.find("ghost_auto_") == 0 && hasPotion == true) {
-          int ghostIdNum = std::stoi(sightHit.objectId.substr(11));
-          activeGhosts[ghostIdNum] = false;
-          Instance &item = SC.TI[0].I[sightHit.index];
-          item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
-          item.C = nullptr;
-          if (areAllGhostsDefeated())
-          {
-            changePrize("chair_bad");
-          }
-        }
-      }
     }
 
     if (isGrounded && m.y > 0) {
@@ -1054,6 +1131,10 @@ protected:
     rockLogic(deltaT);
 
     ghostLogic(deltaT);
+
+    handleInteraction(fire, forward);
+
+    checkEndCondition();
     
     return deltaT;
   }
