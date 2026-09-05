@@ -53,7 +53,7 @@ protected:
   // Vertex formants, Pipelines [Shader couples] and Render passes
   VertexDescriptor VD, VDsky;
   RenderPass RP;
-  Pipeline P, Psky;
+  Pipeline P, Psky, Pghost;
   
   // Models, textures and Descriptors (values assigned to the uniforms)
   DescriptorSet DSglobal, DSsky;
@@ -112,16 +112,27 @@ protected:
   bool replayWasPressed = false;
   int remainingGhosts = 0;
   int spawnedGhosts = 0;
+  const float ghostRadius = 0.4f;
   glm::mat4 initialPotionTransform = glm::mat4(1.0f);
+  Collider* initialPotionCollider;
 
   // Maps string ID -> array index inside SC.TI[0].I
   std::unordered_map<std::string, int> instanceIndexMap;
+  std::unordered_map<std::string, int> ghostIndexMap;
 
   void mapInstanceIndices(const nlohmann::json& sceneData) {
     auto& elements = sceneData["instances"][0]["elements"];
     for (int i = 0; i < elements.size(); ++i) {
       std::string id = elements[i]["id"];
       instanceIndexMap[id] = i; // Save exact position in the SC array
+    }
+  }
+
+  void mapGhostIndices(const nlohmann::json& sceneData) {
+    auto& elements = sceneData["instances"][1]["elements"];
+    for (int i = 0; i < elements.size(); ++i) {
+      std::string id = elements[i]["id"];
+      ghostIndexMap[id] = i; // Save exact position in the SC array
     }
   }
   
@@ -201,6 +212,8 @@ protected:
 
     Psky.init(this, &VDsky, "shaders/nightSky.vert.spv",
 	     "shaders/nightSky.frag.spv", {&DSLsky});
+    Pghost.init(this, &VD, "shaders/ghost.vert.spv", "shaders/ghost.frag.spv", {&DSLglobal, &DSLlocal});
+    Pghost.setTransparency(true);
     Psky.setCullMode(VK_CULL_MODE_NONE);
     Psky.setCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
     
@@ -214,7 +227,7 @@ protected:
     VDRs.resize(1);
     VDRs[0].init("VDposUV",  &VD);
     
-    PRs.resize(1);
+    PRs.resize(2);
     PRs[0].init("BlinnPos", {
 	{&P, {//Pipeline and DSL for the main pass
 	    /*DSLglobal*/{},
@@ -224,7 +237,12 @@ protected:
 	  }
 	}
       }, /*TotalNtextures*/1, &VD);
+
+    PRs[1].init("GhostTech", {
+      {&Pghost, { {}, { {true, 0, {}} } } }
+    }, 1, &VD);
     
+
     // 1. Setup Random Number Generators
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -240,6 +258,11 @@ protected:
     nlohmann::json sceneData;
     inFile >> sceneData;
     inFile.close();
+
+    nlohmann::json ghostTechnique = nlohmann::json::object();
+    ghostTechnique["technique"] = "GhostTech";
+    ghostTechnique["elements"] = nlohmann::json::array();
+    sceneData["instances"].push_back(ghostTechnique);
 
     // 3. Procedurally generate graves across 22 steps
     int totalSteps = 22;
@@ -309,14 +332,82 @@ protected:
 
         sceneData["instances"][0]["elements"].push_back(brokenGraveInst);
 
-        sceneData["instances"][0]["elements"].push_back(ghostInst);
+        sceneData["instances"][1]["elements"].push_back(ghostInst);
 
         activeGhosts.push_back(false);
         ghostSpeeds.push_back(currSpeed(gen));
       }
     }
 
+    // --- BOTTOM AREA OBJECT GENERATION ---
+
+    // Define the safe spawn area behind the stairs based on your example coordinates
+    std::uniform_real_distribution<float> randBottomX(75.0f, 125.0f);
+    std::uniform_real_distribution<float> randBottomZ(40.0f, 95.0f);
+    std::uniform_real_distribution<float> randRotY(-45.0f, 45.0f);
+    std::uniform_int_distribution<int> randObjType(0, 2);
+
+    std::vector<Collider> bottomObjectColliders;
+
+    int totalToGenerate = 70;
+    int maxRetries = 15;
+    float generationY = 1003.0f;
+
+    for (int i = 0; i < totalToGenerate; ++i) {
+
+      for (int retry = 0; retry < maxRetries; ++retry) {
+        float testX = randBottomX(gen);
+        float testZ = randBottomZ(gen);
+        float requiredRadius = 6.0f; // Minimum distance to keep objects apart
+        Collider currCol;
+        currCol.initSphere(testX, generationY, testZ, requiredRadius);
+        currCol.setWorldMatrix(glm::mat4(1.0f));
+
+        // 1. Check for collisions with previously placed objects
+        bool collided = false;
+        for (auto& col : bottomObjectColliders) {
+          if (currCol.collidesWith(col)) {
+            collided = true;
+            break; // Overlap detected, trigger a retry
+          }
+        }
+
+        // 2. If space is clear, build the JSON object and place it
+        if (!collided) {
+          bottomObjectColliders.push_back(currCol);
+          int objType = randObjType(gen);
+
+          nlohmann::json newInst = nlohmann::json::object();
+          newInst["texture"] = std::vector<std::string>{"furniture"};
+          newInst["translate"] = std::vector<float>{testX, generationY, testZ};
+          newInst["eulerAngles"] = std::vector<float>{0.0f, randRotY(gen), 0.0f};
+
+          // Assign specific models and scales based on random type
+          if (objType == 0) {
+            newInst["id"] = "candle_F_" + std::to_string(i);
+            newInst["model"] = "candle";
+            newInst["scale"] = std::vector<float>{10.0f, 10.0f, 10.0f};
+          }
+          else if (objType == 1) {
+            newInst["id"] = "grave_long2_F_" + std::to_string(i);
+            newInst["model"] = "grave_long_2";
+            newInst["scale"] = std::vector<float>{2.0f, 2.0f, 2.0f};
+          }
+          else {
+            newInst["id"] = "grave_long3_F_" + std::to_string(i);
+            newInst["model"] = "grave_long_3";
+            newInst["scale"] = std::vector<float>{2.0f, 2.0f, 2.0f};
+          }
+
+          sceneData["instances"][0]["elements"].push_back(newInst);
+          break; // Break out of the 5-attempt retry loop
+        }
+      }
+    }
+
+
     mapInstanceIndices(sceneData);
+    mapGhostIndices(sceneData);
 
     // 4. Save to a temporary file
     std::string generatedScenePath = "assets/scenes/scene_generated.json";
@@ -340,14 +431,15 @@ protected:
     for (int i = 0; i < graveIdCounter; ++i) {
       int graveIdx = instanceIndexMap["grave_auto_" + std::to_string(i)];
       int brokenIdx = instanceIndexMap["broken_grave_auto_" + std::to_string(i)];
-      int ghostIdx = instanceIndexMap["ghost_auto_" + std::to_string(i)];
+      int ghostIdx = ghostIndexMap["ghost_auto_" + std::to_string(i)];
       initialGraveTransforms[i] = SC.TI[0].I[graveIdx].Wm;
       initialBrokenGraveTransforms[i] = SC.TI[0].I[brokenIdx].Wm;
-      initialGhostTransforms[i] = SC.TI[0].I[ghostIdx].Wm;
+      initialGhostTransforms[i] = SC.TI[1].I[ghostIdx].Wm;
     }
 
     if (instanceIndexMap.count("hidden_room_potion")) {
       initialPotionTransform = SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].Wm;
+      initialPotionCollider = SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].C;
       potionTransformSaved = true;
     }
     
@@ -370,6 +462,7 @@ protected:
     // This creates a new pipeline (with the current surface), using its shaders for the provided render pass
     P.create(&RP);
     Psky.create(&RP);
+    Pghost.create(&RP);
     
     DSglobal.init(this, &DSLglobal, {});
     DSsky.init(this, &DSLsky, {});
@@ -386,6 +479,7 @@ protected:
   void pipelinesAndDescriptorSetsCleanup() {
     P.cleanup();
     Psky.cleanup();
+    Pghost.cleanup();
     
     RP.cleanup();
     
@@ -405,6 +499,7 @@ protected:
     
     P.destroy();
     Psky.destroy();
+    Pghost.destroy();
     VDsky.cleanup();
     
     RP.destroy();
@@ -474,7 +569,14 @@ protected:
     GlobalUniformBufferObject gubo{};
     
     gubo.lightDir = lightDir;
-    gubo.lightColor = glm::vec4(0.55f, 0.68f, 1.0f, 1.0f) * 0.85f;
+    // Check if the player is inside the castle/dungeon area (y > 1000.0f)
+    if (camPos.y > 1000.0f) {
+      // Dim the directional light heavily so it doesn't bleed through walls
+      gubo.lightColor = glm::vec4(0.55f, 0.68f, 1.0f, 1.0f) * 0.0f;
+    } else {
+      // Normal outdoor brightness
+      gubo.lightColor = glm::vec4(0.55f, 0.68f, 1.0f, 1.0f) * 0.85f;
+    }
     gubo.eyePos = glm::vec3(glm::inverse(View)[3]);
 
     gubo.pointLightPos[0] = glm::vec4(79.0f, 1024.0f, 85.0f, 1.0f);
@@ -521,6 +623,21 @@ protected:
       // DS[1] = Pchar pass (main render): set0=DSLglobal, set1=DSLlocal
       SC.TI[0].I[instanceId].DS[0][0]->map(currentImage, &gubo, 0); // global (light/camera)
       SC.TI[0].I[instanceId].DS[0][1]->map(currentImage, &ubo, 0); // camera MVPs
+    }
+
+    // ghost pass
+    for(instanceId = 0; instanceId < SC.TI[1].InstanceCount; instanceId++) {
+      ubo.mMat = SC.TI[1].I[instanceId].Wm;
+      ubo.mvpMat = ViewPrj * ubo.mMat;
+      float worldDeterminant = glm::determinant(ubo.mMat);
+      ubo.normalMat = glm::abs(worldDeterminant) > 0.000001f
+      ? glm::transpose(glm::inverse(ubo.mMat))
+      : glm::mat4(1.0f);
+      ubo.surfaceParams = glm::vec4(0.12f, 0.0f, 1.0f, 0.0f);
+
+      // Map global and local parameters for the ghosts
+      SC.TI[1].I[instanceId].DS[0][0]->map(currentImage, &gubo, 0);
+      SC.TI[1].I[instanceId].DS[0][1]->map(currentImage, &ubo, 0);
     }
     
     // updates the FPS
@@ -596,15 +713,15 @@ protected:
 
       if (instanceIndexMap.count(graveId) &&
         instanceIndexMap.count(brokenId) &&
-        instanceIndexMap.count(ghostId)) {
+        ghostIndexMap.count(ghostId)) {
 
         int mainIdx   = instanceIndexMap[graveId];
       int brokenIdx = instanceIndexMap[brokenId];
-      int ghostIdx  = instanceIndexMap[ghostId];
+      int ghostIdx  = ghostIndexMap[ghostId];
 
       Instance &mainGrave   = SC.TI[0].I[mainIdx];
       Instance &brokenGrave = SC.TI[0].I[brokenIdx];
-      Instance &ghost       = SC.TI[0].I[ghostIdx];
+      Instance &ghost       = SC.TI[1].I[ghostIdx];
 
       mainGrave.Wm = initialGraveTransforms[i];
       brokenGrave.Wm = initialBrokenGraveTransforms[i];
@@ -614,6 +731,7 @@ protected:
 
     if (potionTransformSaved && instanceIndexMap.count("hidden_room_potion")) {
       SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].Wm = initialPotionTransform;
+      SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].C = initialPotionCollider;
     }
 
     // 6. Reset Rock Instance Matrices in Scene
@@ -685,7 +803,7 @@ protected:
       if (instanceIndexMap.count(graveId)) {
         int mainIdx   = instanceIndexMap[graveId];
         int brokenIdx = instanceIndexMap[brokenId];
-        int ghostIdx  = instanceIndexMap[ghostId];
+        int ghostIdx  = ghostIndexMap[ghostId];
 
         Instance &mainGrave = SC.TI[0].I[mainIdx];
 
@@ -703,7 +821,7 @@ protected:
           Instance &brokenGrave = SC.TI[0].I[brokenIdx];
           brokenGrave.Wm = glm::scale(initialBrokenGraveTransforms[i], glm::vec3(1500.0f));
 
-          Instance &ghost = SC.TI[0].I[ghostIdx];
+          Instance &ghost = SC.TI[1].I[ghostIdx];
           ghost.Wm = glm::scale(initialGhostTransforms[i], glm::vec3(1500.0f));
         }
       }
@@ -816,7 +934,6 @@ protected:
   }
 
   void ghostLogic(float deltaT) {
-    const float ghostRadius = 0.4f;
     const float ghostPosMax = 126.5f;
     const float ghostPosMin = 77.5f;
 
@@ -824,9 +941,9 @@ protected:
       if (i < activeGhosts.size() && activeGhosts[i]) {
         std::string ghostId = "ghost_auto_" + std::to_string(i);
 
-        if (instanceIndexMap.count(ghostId)) {
-          int ghostIdx = instanceIndexMap[ghostId];
-          Instance &ghost = SC.TI[0].I[ghostIdx];
+        if (ghostIndexMap.count(ghostId)) {
+          int ghostIdx = ghostIndexMap[ghostId];
+          Instance &ghost = SC.TI[1].I[ghostIdx];
 
           Collider playerCol;
           playerCol.initSphere(camPos.x, camPos.y - playerHeight / 2.0f, camPos.z, playerHeight / 2.0f);
@@ -881,57 +998,71 @@ protected:
     }
   }
 
-  void handleInteraction(bool fire, const glm::vec3 &forward) {
-    bool firePressed = fire && !fireWasPressed;
-    fireWasPressed = fire;
-    if (!firePressed) {
-      return;
-    }
+  struct RaycastHit {
+    bool hit = false;
+    float distance = 0.0f;
+    std::string objectId = "";
+    int index = -1;
+  };
 
-    if (potionAvailable && instanceIndexMap.count("hidden_room_potion")) {
-      int potionIdx = instanceIndexMap["hidden_room_potion"];
-      glm::vec3 potionPos = glm::vec3(SC.TI[0].I[potionIdx].Wm[3]);
-      if (glm::length(potionPos - camPos) <= 4.0f) {
-        hasPotion = true;
-        potionAvailable = false;
-        SC.TI[0].I[potionIdx].Wm = glm::scale(initialPotionTransform, glm::vec3(0.0f));
-        collisionDisabled[potionIdx] = true;
-        return;
+  RaycastHit getObjectInSight(glm::vec3 origin, glm::vec3 direction, float maxDistance) {
+    RaycastHit result;
+    const float stepSize = 0.2f; // Distance to move forward each check
+
+    // Step forward along the view direction
+    for (float dist = 0.0f; dist <= maxDistance; dist += stepSize) {
+      glm::vec3 checkPos = origin + (direction * dist);
+
+      // Create a tiny collider at the current point on the ray
+      Collider rayPoint;
+      rayPoint.initSphere(checkPos.x, checkPos.y, checkPos.z, 0.1f);
+      rayPoint.setWorldMatrix(glm::mat4(1.0f));
+
+      // Test this point against all objects in the scene
+      for (int t = 0; t < SC.TechniqueInstanceCount; t++) {
+        for (int i = 0; i < SC.TI[t].InstanceCount; i++) {
+          Instance &inst = SC.TI[t].I[i];
+
+          if (inst.C != nullptr && rayPoint.collidesWith(*(inst.C))) {
+            result.hit = true;
+            result.distance = dist;
+            result.index = i;
+
+            // Look up the string ID
+            for (const auto& [id, mappedIdx] : instanceIndexMap) {
+              if (mappedIdx == i) {
+                result.objectId = id;
+                break;
+              }
+            }
+            return result; // Return immediately on the first hit
+          }
+        }
+      }
+      for (int i = 0; i < graveIdCounter; ++i) {
+        if (i < activeGhosts.size() && activeGhosts[i]) {
+          std::string ghostId = "ghost_auto_" + std::to_string(i);
+          if (ghostIndexMap.count(ghostId)) {
+            int ghostIdx = ghostIndexMap[ghostId];
+            Instance &ghost = SC.TI[1].I[ghostIdx];
+
+            glm::vec3 pos = glm::vec3(ghost.Wm[3]);
+            Collider ghostCol;
+            ghostCol.initSphere(pos.x, pos.y, pos.z, ghostRadius);
+
+            if (ghostCol.collidesWith(rayPoint))
+            {
+              result.hit = true;
+              result.distance = dist;
+              result.index = ghostIdx;
+              result.objectId = ghostId;
+              return result;
+            }
+          }
+        }
       }
     }
-
-    if (!hasPotion) {
-      return;
-    }
-
-    int targetGhost = -1;
-    float closestDistance = 5.0f;
-    glm::vec3 viewDirection = glm::normalize(forward);
-
-    for (int i = 0; i < graveIdCounter; ++i) {
-      if (!activeGhosts[i]) {
-        continue;
-      }
-
-      int ghostIdx = instanceIndexMap["ghost_auto_" + std::to_string(i)];
-      glm::vec3 ghostPos = glm::vec3(SC.TI[0].I[ghostIdx].Wm[3]);
-      glm::vec3 toGhost = ghostPos - camPos;
-      float distance = glm::length(toGhost);
-
-      if (distance > 0.0f && distance <= closestDistance &&
-          glm::dot(glm::normalize(toGhost), viewDirection) >= 0.8f) {
-        closestDistance = distance;
-        targetGhost = i;
-      }
-    }
-
-    if (targetGhost >= 0) {
-      int ghostIdx = instanceIndexMap["ghost_auto_" + std::to_string(targetGhost)];
-      SC.TI[0].I[ghostIdx].Wm =
-          glm::scale(initialGhostTransforms[targetGhost], glm::vec3(0.0f));
-      activeGhosts[targetGhost] = false;
-      remainingGhosts--;
-    }
+    return result;
   }
 
   void checkEndCondition() {
@@ -1074,6 +1205,32 @@ protected:
     }
     }
 
+    // 1. Calculate raycast (e.g., max 4.0 units away)
+    float maxPickupDistance = 4.0f;
+
+
+    // 2. Handle interaction if an object is within reach
+    if (m.y > 0) {
+      RaycastHit sightHit = getObjectInSight(camPos, forward, maxPickupDistance);
+
+      if (sightHit.hit) {
+        if (sightHit.objectId.find("hidden_room_potion") == 0) {
+          Instance &item = SC.TI[0].I[sightHit.index];
+          item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
+          item.C = nullptr;
+          hasPotion = true;
+        }
+        if (sightHit.objectId.find("ghost_auto_") == 0 && hasPotion == true) {
+          int ghostIdNum = std::stoi(sightHit.objectId.substr(11));
+          activeGhosts[ghostIdNum] = false;
+          Instance &item = SC.TI[1].I[sightHit.index];
+          item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
+          item.C = nullptr;
+          remainingGhosts--;
+        }
+      }
+    }
+
     if (isGrounded && fire) {
       velocity_y = jumpImpulse;
       isGrounded = false;
@@ -1146,8 +1303,6 @@ protected:
     rockLogic(deltaT);
 
     ghostLogic(deltaT);
-
-    handleInteraction(m.y > 0, forward);
 
     checkEndCondition();
     

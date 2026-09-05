@@ -49,7 +49,7 @@ void main() {
         specularFactor = pow(max(dot(N, H), 0.0), 48.0);
     }
 
-    vec3 ambient = 0.09 * albedo;
+    vec3 ambient = 0.001 * albedo;
     vec3 diffuse = albedo * NdotL * gubo.lightColor.rgb;
     vec3 specular = vec3(0.30) * specularFactor * gubo.lightColor.rgb;
 
@@ -67,7 +67,7 @@ void main() {
         }
 
         float attenuation = 1.0 /
-            (1.0 + 0.09 * distanceToLight + 0.032 * distanceToLight * distanceToLight);
+            (2.5 + 0.48 * distanceToLight + 0.24 * distanceToLight * distanceToLight);
         pointLighting +=
             (albedo * pointDiffuse + vec3(0.20) * pointSpecular) *
             gubo.pointLightColor[i].rgb * attenuation;
