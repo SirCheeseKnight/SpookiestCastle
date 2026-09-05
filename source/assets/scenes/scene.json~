@@ -1,0 +1,21 @@
+{
+	"models": [
+	    {"id": "floor", "VD": "VDposUV", "model": "assets/models/Plane.gltf",  "format":"GLTF"},
+	    {"id": "castle", "VD": "VDposUV", "model": "assets/models/SPW_Medieval_Castle_01.mgcg",  "format":"MGCG"}
+	],
+	"textures": [
+	    {"id": "tex", "texture": "assets/textures/toChange.jpg", "format": "C"},
+	    {"id": "medieval", "texture": "assets/textures/SPW_Medieval.png", "format": "C"}
+	],
+	"instances": [
+		{"technique": "BlinnPos", "elements": [
+		    {"id": "floor", "model": "floor",   "texture": ["tex"], "scale": [100.0, 100.0, 100.0]},
+		    {"id": "castle", "model": "castle",   "texture": ["medieval"], "translate": [0.0, 0.0, 10.0], "scale": [1.0, 1.0, 1.0], "eulerAngles": [90.0, 90.0, 90.0],
+		     "collider": {
+			 "type": "AABB",
+			 "min": [-5.0, 0.0, -5.0],
+			 "max": [5.0, 8.0, 5.0]
+		     }}
+		]}
+	]
+}

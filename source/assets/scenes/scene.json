@@ -81,12 +81,6 @@
 	    {"id": "bottle", "VD": "VDposUV", "model": "assets/models/prop.051_Mesh.4546.mgcg",  "format":"MGCG", "collider": {
             "type": "FitAABB"
 	    }},
-	    {"id": "chair", "VD": "VDposUV", "model": "assets/models/armchair_011_Mesh.533.mgcg",  "format":"MGCG", "collider": {
-            "type": "FitAABB"
-	    }},
-	    {"id": "chair_bad", "VD": "VDposUV", "model": "assets/models/chair.005_Mesh.7153.mgcg",  "format":"MGCG", "collider": {
-            "type": "FitAABB"
-	    }},
 	    {"id": "chest", "VD": "VDposUV", "model": "assets/models/TreasureChest.mgcg",  "format":"MGCG", "collider": {
             "type": "FitAABB"
 	    }},
@@ -99,14 +93,29 @@
 	    {"id": "lamp", "VD": "VDposUV", "model": "assets/models/light.012_Mesh.4744.mgcg",  "format":"MGCG", "collider": {
             "type": "FitAABB"
 	    }},
-	    {"id": "wall_lamp_visual", "VD": "VDposUV", "model": "assets/models/light.012_Mesh.4744.mgcg",  "format":"MGCG"},
+	    {"id": "wall_lamp_visual", "VD": "VDposUV", "model": "assets/models/light.012_Mesh.4744.mgcg",  "format":"MGCG", "collider": {
+            "type": "FitAABB"
+	    }},
 	    {"id": "exterior_path", "VD": "VDposUV", "model": "assets/models/Plane.gltf",  "format":"GLTF"},
-	    {"id": "exterior_stone_block", "VD": "VDposUV", "model": "assets/models/Walls_009_Plane.003.mgcg",  "format":"MGCG"},
-	    {"id": "exterior_grave_cross", "VD": "VDposUV", "model": "assets/models/grave.016_Mesh.7916.mgcg",  "format":"MGCG"},
-	    {"id": "exterior_grave_slab", "VD": "VDposUV", "model": "assets/models/grave.046_Mesh.7529.mgcg",  "format":"MGCG"},
-	    {"id": "exterior_grave_round", "VD": "VDposUV", "model": "assets/models/grave.050_Mesh.7517.mgcg",  "format":"MGCG"},
-	    {"id": "exterior_dead_tree", "VD": "VDposUV", "model": "assets/models/SPW_Natures_Tree_Dead_01.mgcg",  "format":"MGCG"},
-	    {"id": "exterior_wood_container", "VD": "VDposUV", "model": "assets/Castle/SPW_Medieval_Box_01.mgcg",  "format":"MGCG"},
+	    {"id": "exterior_stone_block", "VD": "VDposUV", "model": "assets/models/Walls_009_Plane.003.mgcg",  "format":"MGCG", "collider": {
+            "type": "FitAABB"
+	    }},
+	    {"id": "exterior_grave_cross", "VD": "VDposUV", "model": "assets/models/grave.016_Mesh.7916.mgcg",  "format":"MGCG", "collider": {
+            "type": "FitAABB"
+	    }},
+	    {"id": "exterior_grave_slab", "VD": "VDposUV", "model": "assets/models/grave.046_Mesh.7529.mgcg",  "format":"MGCG", "collider": {
+            "type": "FitAABB"
+	    }},
+	    {"id": "exterior_grave_round", "VD": "VDposUV", "model": "assets/models/grave.050_Mesh.7517.mgcg",  "format":"MGCG", "collider": {
+            "type": "FitAABB"
+	    }},
+	    {"id": "exterior_dead_tree", "VD": "VDposUV", "model": "assets/models/SPW_Natures_Tree_Dead_01.mgcg",  "format":"MGCG", "collider": {
+            "type": "Sphere",
+			"params": [0.0, 0.0, 0.0, 0.5]
+	    }},
+	    {"id": "exterior_wood_container", "VD": "VDposUV", "model": "assets/Castle/SPW_Medieval_Box_01.mgcg",  "format":"MGCG", "collider": {
+            "type": "FitAABB"
+	    }},
 	    {"id": "grave_long_1", "VD": "VDposUV", "model": "assets/models/grave.046_Mesh.7529.mgcg",  "format":"MGCG", "collider": {
             "type": "FitAABB"
 	    }},
@@ -207,6 +216,7 @@
             {"id": "wall_lamp_2", "model": "wall_lamp_visual", "texture": ["furniture"], "translate": [126.9, 1038.0, 75.0], "scale": [3.0, 3.0, 3.0], "eulerAngles": [0.0, -90.0, 0.0]},
             {"id": "wall_lamp_3", "model": "wall_lamp_visual", "texture": ["furniture"], "translate": [77.0, 1054.0, 45.0], "scale": [4.0, 4.0, 4.0], "eulerAngles": [0.0, 90.0, 0.0]},
             {"id": "wall_lamp_4", "model": "wall_lamp_visual", "texture": ["furniture"], "translate": [127.0, 1070.0, 25.0], "scale": [4.0, 4.0, 4.0], "eulerAngles": [0.0, -90.0, 0.0]},
+            {"id": "wall_lamp_5", "model": "wall_lamp_visual", "texture": ["furniture"], "translate": [178.6, 1036.0, 45.5], "scale": [4.0, 4.0, 4.0], "eulerAngles": [0.0, 0.0, 0.0]},
             {"id": "rock1", "model": "rock",   "texture": ["rock_alb"], "translate": [115.0, 1080.0, 10.0], "scale": [0.0, 0.0, 0.0]},
             {"id": "rock2", "model": "rock",   "texture": ["rock_alb"], "translate": [90.0, 1080.0, 10.0], "scale": [0.0, 0.0, 0.0]},
             {"id": "tunnel", "model": "doorway",   "texture": ["furniture"], "translate": [150.0, 1032.5, 63.65], "scale": [0.8, 1.5, 226.0], "eulerAngles": [0.0, 90.0, 0.0]},

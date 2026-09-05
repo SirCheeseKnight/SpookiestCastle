@@ -1,4 +1,4 @@
-// TAAHIS IS THE FILE YOU MUST START FROM!A
+// THIS IS THE FILE YOU MUST START FROM!
 
 // This has been adapted from the Vulkan tutorial
 #include <sstream>
@@ -94,6 +94,7 @@ protected:
   bool rockStart = false;
   bool rockStop = false;
   std::vector<float> ghostDirections;
+  std::vector<float> ghostSpeeds;
   std::vector<float> initialGhostDirections;
   std::vector<bool> activeGhosts;
   std::vector<bool> brokenGraves;
@@ -232,6 +233,7 @@ protected:
     std::uniform_real_distribution<float> xPosDist2(95.0f, 105.0f);
     std::uniform_real_distribution<float> xPosDist1(110.0f, 120.0f);
     std::uniform_real_distribution<float> yRotDist(-45.0f, 45.0f);
+    std::uniform_real_distribution<float> currSpeed(6.0f, 9.0f);
 
     // 2. Load the base scene JSON
     std::ifstream inFile("assets/scenes/scene.json");
@@ -310,6 +312,7 @@ protected:
         sceneData["instances"][0]["elements"].push_back(ghostInst);
 
         activeGhosts.push_back(false);
+        ghostSpeeds.push_back(currSpeed(gen));
       }
     }
 
@@ -788,6 +791,7 @@ protected:
       if (rockCol2.collidesWith(playerCol) || rockCol1.collidesWith(playerCol))
       {
         resetGame();
+        return;
       }
 
       checkGraveCollisions(rockCol2);
@@ -812,8 +816,9 @@ protected:
   }
 
   void ghostLogic(float deltaT) {
-    const float ghostSpeed = 6.0f; // Movement speed units/sec
-    const float ghostRadius = 0.7f;
+    const float ghostRadius = 0.4f;
+    const float ghostPosMax = 126.5f;
+    const float ghostPosMin = 77.5f;
 
     for (int i = 0; i < graveIdCounter; ++i) {
       if (i < activeGhosts.size() && activeGhosts[i]) {
@@ -833,36 +838,37 @@ protected:
           if (ghostCol.collidesWith(playerCol))
           {
             resetGame();
+            return;
           }
 
           // 1. Check boundary conditions and flip direction/rotation
-          if (ghostDirections[i] < 0.0f && pos.x <= 80.0f) {
+          if (ghostDirections[i] < 0.0f && pos.x <= ghostPosMin) {
             ghostDirections[i] = 1.0f; // Turn around to move right (+X)
-          } else if (ghostDirections[i] > 0.0f && pos.x >= 125.0f) {
+          } else if (ghostDirections[i] > 0.0f && pos.x >= ghostPosMax) {
             ghostDirections[i] = -1.0f; // Turn around to move left (-X)
           }
 
           float targetYaw = (ghostDirections[i] < 0.0f) ? glm::radians(-90.0f) : glm::radians(90.0f);
 
-          if (pos.x <= 85.0f)
+          if (pos.x <= ghostPosMin + 5.0f)
           {
             if (ghostDirections[i] < 0.0f)
             {
-              targetYaw = glm::radians(-90.0f + (85.0f - pos.x) * 180.0f / 5.0f);
+              targetYaw = glm::radians(-90.0f + (ghostPosMin + 5.0f - pos.x) * 180.0f / 5.0f);
             }
-            pos.x += ghostDirections[i] * ghostSpeed * (pos.x - 79.0f) / 6.0f * deltaT;
+            pos.x += ghostDirections[i] * ghostSpeeds[i] * (pos.x - ghostPosMin + 0.1f) / 5.1f * deltaT;
           }
-          else if (pos.x >= 120.0f)
+          else if (pos.x >= ghostPosMax - 5.0f)
           {
             if (ghostDirections[i] > 0.0f)
             {
-              targetYaw = glm::radians(90.0f - (pos.x - 120.0f) * 180.0f / 5.0f);
+              targetYaw = glm::radians(90.0f - (pos.x - ghostPosMax + 5.0f) * 180.0f / 5.0f);
             }
-            pos.x += ghostDirections[i] * ghostSpeed * (126.0f - pos.x) / 6.0f * deltaT;
+            pos.x += ghostDirections[i] * ghostSpeeds[i] * (ghostPosMax + 0.1f - pos.x) / 5.1f * deltaT;
           }
           else
           {
-            pos.x += ghostDirections[i] * ghostSpeed * deltaT;
+            pos.x += ghostDirections[i] * ghostSpeeds[i] * deltaT;
           }
 
           // 4. Reconstruct World Matrix with translation, rotation, and 1.5 scale
@@ -942,13 +948,24 @@ protected:
       gameState = GameState::Lost;
     }
 
-    std::string result = gameState == GameState::Won ? "YOU WIN" : "YOU LOSE";
+    std::string result = "YOU WIN";
+    if (gameState == GameState::Won)
+    {
+      if (hasPotion)
+      {
+        result = "YOU WIN \n BUT AT WHAT COST?";
+      }
+    }
+    else
+    {
+      result = "YOU LOSE \n GHOSTS REMAINING: " + std::to_string(remainingGhosts);
+    }
     glm::vec4 resultColor = gameState == GameState::Won
         ? glm::vec4(0.25f, 1.0f, 0.35f, 1.0f)
         : glm::vec4(1.0f, 0.2f, 0.2f, 1.0f);
     txt.print(0.0f, 0.0f,
               "====================\n" + result +
-              "\n\n[ REPLAY ]\nPress R or ENTER\n====================",
+              "\n\n[ REPLAY ]\nPress R \n====================",
               2, "SS", false, true, false,
               TAL_CENTER, TRH_CENTER, TRV_MIDDLE,
               resultColor,
@@ -967,16 +984,14 @@ protected:
     bool fire = false;
     getSixAxis(deltaT, m, r, fire);
 
-    bool replayPressed =
-        glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS;
+    bool replayPressed = (m.y > 0);
 
     if (gameState != GameState::Playing) {
       if (replayPressed && !replayWasPressed) {
         resetGame();
       }
       replayWasPressed = replayPressed;
-      fireWasPressed = fire;
+      fireWasPressed = (m.y > 0);
       return deltaT;
     }
     replayWasPressed = replayPressed;
@@ -1059,7 +1074,7 @@ protected:
     }
     }
 
-    if (isGrounded && m.y > 0) {
+    if (isGrounded && fire) {
       velocity_y = jumpImpulse;
       isGrounded = false;
     }
@@ -1132,7 +1147,7 @@ protected:
 
     ghostLogic(deltaT);
 
-    handleInteraction(fire, forward);
+    handleInteraction(m.y > 0, forward);
 
     checkEndCondition();
     
