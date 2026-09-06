@@ -49,7 +49,9 @@ void main() {
         specularFactor = pow(max(dot(N, H), 0.0), 48.0);
     }
 
-    vec3 ambient = 0.001 * albedo;
+    // lightColor.a is a simple scene-dependent ambient strength. It is higher
+    // indoors so surfaces outside the small torch pools do not become black.
+    vec3 ambient = gubo.lightColor.a * albedo;
     vec3 diffuse = albedo * NdotL * gubo.lightColor.rgb;
     vec3 specular = vec3(0.30) * specularFactor * gubo.lightColor.rgb;
 
@@ -66,8 +68,9 @@ void main() {
             pointSpecular = pow(max(dot(N, pointH), 0.0), 48.0);
         }
 
+        // Simple distance attenuation with a moderate range for the large hall.
         float attenuation = 1.0 /
-            (2.5 + 0.48 * distanceToLight + 0.24 * distanceToLight * distanceToLight);
+            (1.0 + 0.12 * distanceToLight + 0.045 * distanceToLight * distanceToLight);
         pointLighting +=
             (albedo * pointDiffuse + vec3(0.20) * pointSpecular) *
             gubo.pointLightColor[i].rgb * attenuation;

@@ -569,13 +569,18 @@ protected:
     GlobalUniformBufferObject gubo{};
     
     gubo.lightDir = lightDir;
+    // RGB stores the directional-light colour; alpha stores a small ambient
+    // strength so the interior remains readable away from the torches.
     // Check if the player is inside the castle/dungeon area (y > 1000.0f)
     if (camPos.y > 1000.0f) {
       // Dim the directional light heavily so it doesn't bleed through walls
-      gubo.lightColor = glm::vec4(0.55f, 0.68f, 1.0f, 1.0f) * 0.0f;
+      gubo.lightColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.055f);
     } else {
-      // Normal outdoor brightness
-      gubo.lightColor = glm::vec4(0.55f, 0.68f, 1.0f, 1.0f) * 0.85f;
+      // Moonlit exterior with less ambient fill than the interior
+      gubo.lightColor = glm::vec4(0.55f * 0.85f,
+                                  0.68f * 0.85f,
+                                  1.00f * 0.85f,
+                                  0.015f);
     }
     gubo.eyePos = glm::vec3(glm::inverse(View)[3]);
 
