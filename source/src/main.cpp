@@ -212,8 +212,8 @@ protected:
     // The last array, is a vector of pointer to the layouts of the sets that will
     // be used in this pipeline. The first element will be set 0, and so on..
     
-    P.init(this, &VD, "shaders/toChangeSimplePos.vert.spv",
-	   "shaders/toChangeBlinnFromPos.frag.spv",
+    P.init(this, &VD, "shaders/castle_lighting.vert.spv",
+	   "shaders/castle_lighting.frag.spv",
 	   {&DSLglobal, &DSLlocal});
 
     Psky.init(this, &VDsky, "shaders/nightSky.vert.spv",
