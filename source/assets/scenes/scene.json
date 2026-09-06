@@ -91,6 +91,11 @@
 	    {"id": "wall_lamp_visual", "VD": "VDposUV", "model": "assets/models/light.012_Mesh.4744.mgcg",  "format":"MGCG", "collider": {
             "type": "FitAABB"
 	    }},
+	    {"id": "decorative_lamp", "VD": "VDposUV", "model": "assets/models/light.012_Mesh.4744.mgcg",  "format":"MGCG"},
+	    {"id": "room_barrel", "VD": "VDposUV", "model": "assets/Dungeon/barrel.001_Mesh.4453.mgcg",  "format":"MGCG"},
+	    {"id": "room_crate", "VD": "VDposUV", "model": "assets/Dungeon/box.003_Mesh.904.mgcg",  "format":"MGCG"},
+	    {"id": "room_cupboard", "VD": "VDposUV", "model": "assets/Dungeon/cupboard.001_Mesh.6553.mgcg",  "format":"MGCG"},
+	    {"id": "room_bones", "VD": "VDposUV", "model": "assets/models/bones.008_Mesh.7359.mgcg",  "format":"MGCG"},
 	    {"id": "exterior_path", "VD": "VDposUV", "model": "assets/models/Plane.gltf",  "format":"GLTF"},
 	    {"id": "exterior_stone_block", "VD": "VDposUV", "model": "assets/models/Walls_009_Plane.003.mgcg",  "format":"MGCG", "collider": {
             "type": "FitAABB"
@@ -210,6 +215,17 @@
             {"id": "wall_lamp_3", "model": "wall_lamp_visual", "texture": ["furniture"], "translate": [77.0, 1054.0, 45.0], "scale": [4.0, 4.0, 4.0], "eulerAngles": [0.0, 90.0, 0.0]},
             {"id": "wall_lamp_4", "model": "wall_lamp_visual", "texture": ["furniture"], "translate": [127.0, 1070.0, 25.0], "scale": [4.0, 4.0, 4.0], "eulerAngles": [0.0, -90.0, 0.0]},
             {"id": "wall_lamp_5", "model": "wall_lamp_visual", "texture": ["furniture"], "translate": [178.6, 1036.0, 45.5], "scale": [4.0, 4.0, 4.0], "eulerAngles": [0.0, 0.0, 0.0]},
+
+            {"id": "tunnel_lamp_1", "model": "decorative_lamp", "texture": ["furniture"], "translate": [142.0, 1036.0, 62.2], "scale": [3.0, 3.0, 3.0], "eulerAngles": [0.0, 0.0, 0.0]},
+            {"id": "tunnel_lamp_2", "model": "decorative_lamp", "texture": ["furniture"], "translate": [158.0, 1036.0, 62.2], "scale": [3.0, 3.0, 3.0], "eulerAngles": [0.0, 0.0, 0.0]},
+            {"id": "potion_room_lamp", "model": "decorative_lamp", "texture": ["furniture"], "translate": [184.0, 1036.0, 57.5], "scale": [3.5, 3.5, 3.5], "eulerAngles": [0.0, -90.0, 0.0]},
+
+            {"id": "potion_room_cupboard", "model": "room_cupboard", "texture": ["dungeon"], "translate": [183.8, 1032.0, 50.0], "scale": [1.35, 1.35, 1.35], "eulerAngles": [0.0, -90.0, 0.0]},
+            {"id": "potion_room_barrel", "model": "room_barrel", "texture": ["dungeon"], "translate": [174.2, 1032.0, 48.0], "scale": [1.25, 1.25, 1.25], "eulerAngles": [0.0, 15.0, 0.0]},
+            {"id": "potion_room_crate_1", "model": "room_crate", "texture": ["dungeon"], "translate": [182.8, 1032.0, 61.8], "scale": [1.0, 1.0, 1.0], "eulerAngles": [0.0, 17.0, 0.0]},
+            {"id": "potion_room_crate_2", "model": "room_crate", "texture": ["dungeon"], "translate": [181.4, 1032.0, 62.0], "scale": [0.72, 0.72, 0.72], "eulerAngles": [0.0, -21.0, 0.0]},
+            {"id": "potion_room_bones", "model": "room_bones", "texture": ["dungeon"], "translate": [175.0, 1032.05, 59.0], "scale": [1.2, 1.2, 1.2], "eulerAngles": [0.0, 28.0, 0.0]},
+
             {"id": "rock1", "model": "rock",   "texture": ["rock_alb"], "translate": [115.0, 1080.0, 10.0], "scale": [0.0, 0.0, 0.0]},
             {"id": "rock2", "model": "rock",   "texture": ["rock_alb"], "translate": [90.0, 1080.0, 10.0], "scale": [0.0, 0.0, 0.0]},
             {"id": "tunnel", "model": "doorway",   "texture": ["walls"], "translate": [150.0, 1032.5, 63.65], "scale": [0.8, 1.5, 225.8], "eulerAngles": [0.0, 90.0, 0.0]},

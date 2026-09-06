@@ -13,6 +13,8 @@
 #include "modules/TextMaker.hpp"
 #include "modules/Scene.hpp"
 
+constexpr int MAX_POINT_LIGHTS = 16;
+
 // The uniform buffer object used in this example
 struct UniformBufferObject {
   alignas(16) glm::mat4 mvpMat;
@@ -26,8 +28,10 @@ struct GlobalUniformBufferObject {
   alignas(16) glm::vec3 lightDir;
   alignas(16) glm::vec4 lightColor;
   alignas(16) glm::vec3 eyePos;
-  alignas(16) glm::vec4 pointLightPos[6];
-  alignas(16) glm::vec4 pointLightColor[6];
+  alignas(16) glm::vec4 pointLightPos[MAX_POINT_LIGHTS];
+  alignas(16) glm::vec4 pointLightColor[MAX_POINT_LIGHTS];
+  // x: number of active point lights
+  alignas(16) glm::vec4 pointLightInfo;
 };
 
 struct Vertex {
@@ -108,6 +112,8 @@ protected:
   bool hasPotion = false;
   bool potionAvailable = true;
   bool potionTransformSaved = false;
+  bool potionAnimationPlaying = false;
+  float potionAnimationTime = 0.0f;
   bool fireWasPressed = false;
   bool replayWasPressed = false;
   int remainingGhosts = 0;
@@ -584,17 +590,40 @@ protected:
     }
     gubo.eyePos = glm::vec3(glm::inverse(View)[3]);
 
-    gubo.pointLightPos[0] = glm::vec4(79.0f, 1024.0f, 85.0f, 1.0f);
-    gubo.pointLightPos[1] = glm::vec4(125.0f, 1040.0f, 75.0f, 1.0f);
-    gubo.pointLightPos[2] = glm::vec4(79.0f, 1056.0f, 45.0f, 1.0f);
-    gubo.pointLightPos[3] = glm::vec4(125.0f, 1072.0f, 25.0f, 1.0f);
-    for (int i = 0; i < 4; ++i) {
-      gubo.pointLightColor[i] = glm::vec4(4.0f, 1.8f, 0.6f, 1.0f);
+    const int wallLampModelId = SC.MeshIds["wall_lamp_visual"];
+    const int decorativeLampModelId = SC.MeshIds["decorative_lamp"];
+    const int lampModelId = SC.MeshIds["lamp"];
+    const int candleModelId = SC.MeshIds["candle"];
+    int pointLightCount = 0;
+
+    // A visible lamp instance automatically contributes one simple point light.
+    for (int i = 0; i < SC.TI[0].InstanceCount && pointLightCount < MAX_POINT_LIGHTS; ++i) {
+      const Instance &instance = SC.TI[0].I[i];
+      const bool isWallLamp = instance.Mid == wallLampModelId ||
+                              instance.Mid == decorativeLampModelId ||
+                              instance.Mid == lampModelId;
+      const bool isCandle = instance.Mid == candleModelId;
+      if (!isWallLamp && !isCandle) {
+        continue;
+      }
+
+      // Ignore any lamp that has been hidden by scaling its world matrix to zero.
+      if (glm::length(glm::vec3(instance.Wm[0])) < 0.001f) {
+        continue;
+      }
+
+      const float localFlameHeight = isCandle ? 0.15f : 0.5f;
+      glm::vec3 lightPosition = glm::vec3(
+          instance.Wm * glm::vec4(0.0f, localFlameHeight, 0.0f, 1.0f));
+      const bool isExteriorLight = lightPosition.y < 100.0f;
+
+      gubo.pointLightPos[pointLightCount] = glm::vec4(lightPosition, 1.0f);
+      gubo.pointLightColor[pointLightCount] = isExteriorLight
+          ? glm::vec4(2.8f, 1.1f, 0.35f, 1.0f)
+          : glm::vec4(4.0f, 1.8f, 0.6f, 1.0f);
+      ++pointLightCount;
     }
-    gubo.pointLightPos[4] = glm::vec4(-2.5f, 4.5f, 18.0f, 1.0f);
-    gubo.pointLightPos[5] = glm::vec4( 2.5f, 4.5f, 18.0f, 1.0f);
-    gubo.pointLightColor[4] = glm::vec4(2.8f, 1.1f, 0.35f, 1.0f);
-    gubo.pointLightColor[5] = glm::vec4(2.8f, 1.1f, 0.35f, 1.0f);
+    gubo.pointLightInfo = glm::vec4(static_cast<float>(pointLightCount), 0.0f, 0.0f, 0.0f);
     
     DSglobal.map(currentImage, &gubo, 0);
     
@@ -659,7 +688,9 @@ protected:
       oss << "Player X: " << camPos.x << "\n";
       oss << "Player Y: " << camPos.y << "\n";
       oss << "Player Z: " << camPos.z << "\n";
-      if (gameState == GameState::Playing && hasPotion) {
+      if (gameState == GameState::Playing && potionAnimationPlaying) {
+        oss << "Drinking potion...\n";
+      } else if (gameState == GameState::Playing && hasPotion) {
         oss << "Potion acquired - Ghosts remaining: " << remainingGhosts << "\n";
       } else if (gameState == GameState::Playing) {
         oss << "Find the potion\n";
@@ -696,6 +727,8 @@ protected:
     gameState = GameState::Playing;
     hasPotion = false;
     potionAvailable = true;
+    potionAnimationPlaying = false;
+    potionAnimationTime = 0.0f;
     fireWasPressed = false;
     remainingGhosts = 0;
     spawnedGhosts = 0;
@@ -1070,6 +1103,90 @@ protected:
     return result;
   }
 
+  void updatePotionAnimation(float deltaT, const glm::vec3 &forward,
+                             const glm::vec3 &right) {
+    if (!potionAnimationPlaying ||
+        !instanceIndexMap.count("hidden_room_potion")) {
+      return;
+    }
+
+    const float pickupDuration = 0.55f;
+    const float drinkDuration = 0.80f;
+    const float totalDuration = pickupDuration + drinkDuration;
+    potionAnimationTime += deltaT;
+
+    const glm::vec3 cameraPosition = glm::vec3(glm::inverse(View)[3]);
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    const glm::vec3 startPosition = glm::vec3(initialPotionTransform[3]);
+    const glm::vec3 heldPosition = cameraPosition + forward * 0.75f +
+                                   right * 0.28f - worldUp * 0.25f;
+    const glm::vec3 mouthPosition = cameraPosition + forward * 0.38f +
+                                    right * 0.10f + worldUp * 0.02f;
+
+    glm::vec3 potionPosition;
+    float tilt = 0.0f;
+    if (potionAnimationTime <= pickupDuration) {
+      float t = glm::clamp(potionAnimationTime / pickupDuration, 0.0f, 1.0f);
+      t = t * t * (3.0f - 2.0f * t);
+      potionPosition = glm::mix(startPosition, heldPosition, t);
+    } else {
+      float t = glm::clamp((potionAnimationTime - pickupDuration) / drinkDuration,
+                           0.0f, 1.0f);
+      t = t * t * (3.0f - 2.0f * t);
+      potionPosition = glm::mix(heldPosition, mouthPosition, t);
+      tilt = glm::radians(-110.0f) * t;
+    }
+
+    int potionIdx = instanceIndexMap["hidden_room_potion"];
+    glm::mat4 drinkRotation = glm::rotate(glm::mat4(1.0f), tilt, glm::normalize(right));
+    SC.TI[0].I[potionIdx].Wm =
+        glm::translate(glm::mat4(1.0f), potionPosition) *
+        drinkRotation * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
+
+    if (potionAnimationTime >= totalDuration) {
+      SC.TI[0].I[potionIdx].Wm =
+          glm::scale(initialPotionTransform, glm::vec3(0.0f));
+      potionAnimationPlaying = false;
+      hasPotion = true;
+    }
+  }
+
+  void handleInteraction(bool interact, const glm::vec3 &forward) {
+    bool firePressed = interact && !fireWasPressed;
+    fireWasPressed = interact;
+    if (!firePressed) {
+      return;
+    }
+
+    RaycastHit sightHit = getObjectInSight(camPos, forward, 4.0f);
+    if (!sightHit.hit) {
+      return;
+    }
+
+    if (potionAvailable &&
+        sightHit.objectId == "hidden_room_potion" &&
+        instanceIndexMap.count("hidden_room_potion")) {
+        int potionIdx = instanceIndexMap["hidden_room_potion"];
+        potionAvailable = false;
+        potionAnimationPlaying = true;
+        potionAnimationTime = 0.0f;
+        collisionDisabled[potionIdx] = true;
+        return;
+    }
+
+    if (hasPotion && sightHit.objectId.rfind("ghost_auto_", 0) == 0) {
+      int ghostIdNum = std::stoi(sightHit.objectId.substr(11));
+      if (ghostIdNum >= 0 && ghostIdNum < static_cast<int>(activeGhosts.size()) &&
+          activeGhosts[ghostIdNum] && ghostIndexMap.count(sightHit.objectId)) {
+        int ghostIdx = ghostIndexMap[sightHit.objectId];
+        activeGhosts[ghostIdNum] = false;
+        SC.TI[1].I[ghostIdx].Wm =
+            glm::scale(initialGhostTransforms[ghostIdNum], glm::vec3(0.0f));
+        remainingGhosts--;
+      }
+    }
+  }
+
   void checkEndCondition() {
     const bool reachedTop = camPos.y >= 1065.0f && camPos.z <= 0.0f;
     if (!reachedTop) {
@@ -1210,32 +1327,6 @@ protected:
     }
     }
 
-    // 1. Calculate raycast (e.g., max 4.0 units away)
-    float maxPickupDistance = 4.0f;
-
-
-    // 2. Handle interaction if an object is within reach
-    if (m.y > 0) {
-      RaycastHit sightHit = getObjectInSight(camPos, forward, maxPickupDistance);
-
-      if (sightHit.hit) {
-        if (sightHit.objectId.find("hidden_room_potion") == 0) {
-          Instance &item = SC.TI[0].I[sightHit.index];
-          item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
-          item.C = nullptr;
-          hasPotion = true;
-        }
-        if (sightHit.objectId.find("ghost_auto_") == 0 && hasPotion == true) {
-          int ghostIdNum = std::stoi(sightHit.objectId.substr(11));
-          activeGhosts[ghostIdNum] = false;
-          Instance &item = SC.TI[1].I[sightHit.index];
-          item.Wm = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
-          item.C = nullptr;
-          remainingGhosts--;
-        }
-      }
-    }
-
     if (isGrounded && fire) {
       velocity_y = jumpImpulse;
       isGrounded = false;
@@ -1308,6 +1399,10 @@ protected:
     rockLogic(deltaT);
 
     ghostLogic(deltaT);
+
+    handleInteraction(m.y > 0, forward);
+
+    updatePotionAnimation(deltaT, forward, right);
 
     checkEndCondition();
     

@@ -9,12 +9,15 @@ layout(location = 0) out vec4 outColor;
 
 layout(binding = 1, set = 1) uniform sampler2D albedoMap;
 
+const int MAX_POINT_LIGHTS = 16;
+
 layout(binding = 0, set = 0) uniform GlobalUniformBufferObject {
     vec3 lightDir;
     vec4 lightColor;
     vec3 eyePos;
-    vec4 pointLightPos[6];
-    vec4 pointLightColor[6];
+    vec4 pointLightPos[MAX_POINT_LIGHTS];
+    vec4 pointLightColor[MAX_POINT_LIGHTS];
+    vec4 pointLightInfo;
 } gubo;
 
 layout(binding = 0, set = 1) uniform UniformBufferObject {
@@ -56,7 +59,8 @@ void main() {
     vec3 specular = vec3(0.30) * specularFactor * gubo.lightColor.rgb;
 
     vec3 pointLighting = vec3(0.0);
-    for (int i = 0; i < 6; ++i) {
+    int pointLightCount = int(gubo.pointLightInfo.x + 0.5);
+    for (int i = 0; i < pointLightCount; ++i) {
         vec3 toLight = gubo.pointLightPos[i].xyz - fragPos;
         float distanceToLight = length(toLight);
         vec3 pointL = toLight / max(distanceToLight, 0.001);
