@@ -9,15 +9,12 @@ layout(location = 0) out vec4 outColor;
 
 layout(binding = 1, set = 1) uniform sampler2D albedoMap;
 
-const int MAX_POINT_LIGHTS = 16;
-
 layout(binding = 0, set = 0) uniform GlobalUniformBufferObject {
     vec3 lightDir;
     vec4 lightColor;
     vec3 eyePos;
-    vec4 pointLightPos[MAX_POINT_LIGHTS];
-    vec4 pointLightColor[MAX_POINT_LIGHTS];
-    vec4 pointLightInfo;
+    vec4 pointLightPos[6];
+    vec4 pointLightColor[6];
 } gubo;
 
 layout(binding = 0, set = 1) uniform UniformBufferObject {
@@ -52,15 +49,12 @@ void main() {
         specularFactor = pow(max(dot(N, H), 0.0), 48.0);
     }
 
-    // lightColor.a is a simple scene-dependent ambient strength. It is higher
-    // indoors so surfaces outside the small torch pools do not become black.
-    vec3 ambient = gubo.lightColor.a * albedo;
+    vec3 ambient = 0.001 * albedo;
     vec3 diffuse = albedo * NdotL * gubo.lightColor.rgb;
     vec3 specular = vec3(0.30) * specularFactor * gubo.lightColor.rgb;
 
     vec3 pointLighting = vec3(0.0);
-    int pointLightCount = int(gubo.pointLightInfo.x + 0.5);
-    for (int i = 0; i < pointLightCount; ++i) {
+    for (int i = 0; i < 6; ++i) {
         vec3 toLight = gubo.pointLightPos[i].xyz - fragPos;
         float distanceToLight = length(toLight);
         vec3 pointL = toLight / max(distanceToLight, 0.001);
@@ -72,9 +66,8 @@ void main() {
             pointSpecular = pow(max(dot(N, pointH), 0.0), 48.0);
         }
 
-        // Simple distance attenuation with a moderate range for the large hall.
         float attenuation = 1.0 /
-            (1.0 + 0.12 * distanceToLight + 0.045 * distanceToLight * distanceToLight);
+            (2.5 + 0.48 * distanceToLight + 0.24 * distanceToLight * distanceToLight);
         pointLighting +=
             (albedo * pointDiffuse + vec3(0.20) * pointSpecular) *
             gubo.pointLightColor[i].rgb * attenuation;
