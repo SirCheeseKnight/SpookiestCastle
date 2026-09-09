@@ -122,6 +122,20 @@ protected:
   glm::mat4 initialPotionTransform = glm::mat4(1.0f);
   Collider* initialPotionCollider;
 
+  static constexpr int EXTERIOR_CROW_COUNT = 5;
+  bool crowFlockTriggered = false;
+  float crowFlightTime = 0.0f;
+  std::vector<glm::mat4> initialPerchedCrowTransforms;
+  std::vector<glm::mat4> initialFlyingCrowTransforms;
+  const std::vector<glm::vec3> crowStartPositions = {
+      {-2.2f, 0.12f, 57.2f}, {-0.8f, 0.12f, 59.0f},
+      { 1.1f, 0.12f, 57.8f}, { 2.5f, 0.12f, 60.2f},
+      { 0.2f, 0.12f, 61.3f}};
+  const std::vector<glm::vec3> crowFlightDirections = {
+      {-0.75f, 0.0f, -0.66f}, {-0.38f, 0.0f, -0.93f},
+      { 0.12f, 0.0f, -0.99f}, { 0.55f, 0.0f, -0.84f},
+      { 0.82f, 0.0f, -0.57f}};
+
   // Maps string ID -> array index inside SC.TI[0].I
   std::unordered_map<std::string, int> instanceIndexMap;
   std::unordered_map<std::string, int> ghostIndexMap;
@@ -448,6 +462,17 @@ protected:
       initialPotionCollider = SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].C;
       potionTransformSaved = true;
     }
+
+    initialPerchedCrowTransforms.resize(EXTERIOR_CROW_COUNT);
+    initialFlyingCrowTransforms.resize(EXTERIOR_CROW_COUNT);
+    for (int i = 0; i < EXTERIOR_CROW_COUNT; ++i) {
+      const std::string perchedId = "exterior_crow_perched_" + std::to_string(i);
+      const std::string flyingId = "exterior_crow_flying_" + std::to_string(i);
+      if (instanceIndexMap.count(perchedId) && instanceIndexMap.count(flyingId)) {
+        initialPerchedCrowTransforms[i] = SC.TI[0].I[instanceIndexMap[perchedId]].Wm;
+        initialFlyingCrowTransforms[i] = SC.TI[0].I[instanceIndexMap[flyingId]].Wm;
+      }
+    }
     
     // initializes the textual output
     txt.init(this, windowWidth, windowHeight);
@@ -583,9 +608,9 @@ protected:
       gubo.lightColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.055f);
     } else {
       // Moonlit exterior with less ambient fill than the interior
-      gubo.lightColor = glm::vec4(0.55f * 0.85f,
-                                  0.68f * 0.85f,
-                                  1.00f * 0.85f,
+      gubo.lightColor = glm::vec4(0.55f * 0.50f,
+                                  0.68f * 0.50f,
+                                  1.00f * 0.50f,
                                   0.015f);
     }
     gubo.eyePos = glm::vec3(glm::inverse(View)[3]);
@@ -649,9 +674,14 @@ protected:
                           SC.TI[0].I[instanceId].Mid == floorModelId ||
                           SC.TI[0].I[instanceId].Mid == exteriorPathModelId ||
                           SC.TI[0].I[instanceId].Mid == exteriorStoneModelId;
-      const float albedoScale = SC.TI[0].I[instanceId].Mid == exteriorPathModelId
-          ? 0.62f
-          : 1.0f;
+      float albedoScale = 1.0f;
+      if (SC.TI[0].I[instanceId].Mid == floorModelId) {
+        albedoScale = 0.40f;
+      } else if (SC.TI[0].I[instanceId].Mid == exteriorPathModelId) {
+        albedoScale = 0.62f;
+      } else if (SC.TI[0].I[instanceId].Mid == exteriorStoneModelId) {
+        albedoScale = 0.52f;
+      }
       ubo.surfaceParams = glm::vec4(0.12f, tiledSurface ? 1.0f : 0.0f, albedoScale, 0.0f);
       
       // DS[1] = Pchar pass (main render): set0=DSLglobal, set1=DSLlocal
@@ -732,6 +762,8 @@ protected:
     fireWasPressed = false;
     remainingGhosts = 0;
     spawnedGhosts = 0;
+    crowFlockTriggered = false;
+    crowFlightTime = 0.0f;
     txt.removeText(2);
 
     // 3. Reset Active Ghosts vector
@@ -770,6 +802,15 @@ protected:
     if (potionTransformSaved && instanceIndexMap.count("hidden_room_potion")) {
       SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].Wm = initialPotionTransform;
       SC.TI[0].I[instanceIndexMap["hidden_room_potion"]].C = initialPotionCollider;
+    }
+
+    for (int i = 0; i < EXTERIOR_CROW_COUNT; ++i) {
+      const std::string perchedId = "exterior_crow_perched_" + std::to_string(i);
+      const std::string flyingId = "exterior_crow_flying_" + std::to_string(i);
+      if (instanceIndexMap.count(perchedId) && instanceIndexMap.count(flyingId)) {
+        SC.TI[0].I[instanceIndexMap[perchedId]].Wm = initialPerchedCrowTransforms[i];
+        SC.TI[0].I[instanceIndexMap[flyingId]].Wm = initialFlyingCrowTransforms[i];
+      }
     }
 
     // 6. Reset Rock Instance Matrices in Scene
@@ -1151,6 +1192,67 @@ protected:
     }
   }
 
+  void updateCrowFlock(float deltaT) {
+    if (camPos.y > 100.0f) {
+      return;
+    }
+
+    const glm::vec2 flockCenter(0.0f, 59.0f);
+    const glm::vec2 playerPosition(camPos.x, camPos.z);
+    if (!crowFlockTriggered &&
+        glm::distance(playerPosition, flockCenter) < 9.0f) {
+      crowFlockTriggered = true;
+      crowFlightTime = 0.0f;
+    }
+
+    if (!crowFlockTriggered) {
+      return;
+    }
+
+    crowFlightTime += deltaT;
+    for (int i = 0; i < EXTERIOR_CROW_COUNT; ++i) {
+      const std::string perchedId = "exterior_crow_perched_" + std::to_string(i);
+      const std::string flyingId = "exterior_crow_flying_" + std::to_string(i);
+      if (!instanceIndexMap.count(perchedId) || !instanceIndexMap.count(flyingId)) {
+        continue;
+      }
+
+      Instance &perchedCrow = SC.TI[0].I[instanceIndexMap[perchedId]];
+      Instance &flyingCrow = SC.TI[0].I[instanceIndexMap[flyingId]];
+      const float localTime = crowFlightTime - static_cast<float>(i) * 0.09f;
+
+      if (localTime <= 0.0f) {
+        perchedCrow.Wm = initialPerchedCrowTransforms[i];
+        flyingCrow.Wm = initialFlyingCrowTransforms[i];
+        continue;
+      }
+
+      perchedCrow.Wm = glm::scale(initialPerchedCrowTransforms[i], glm::vec3(0.0f));
+      if (localTime > 4.5f) {
+        flyingCrow.Wm = glm::scale(initialFlyingCrowTransforms[i], glm::vec3(0.0f));
+        continue;
+      }
+
+      const glm::vec3 horizontalDirection = glm::normalize(crowFlightDirections[i]);
+      glm::vec3 position = crowStartPositions[i] +
+                           horizontalDirection * (7.0f * localTime);
+      position.y += 1.1f + 4.2f * localTime +
+                    0.55f * localTime * localTime +
+                    0.18f * std::sin(localTime * 7.0f + static_cast<float>(i));
+
+      const float yaw = std::atan2(horizontalDirection.x, horizontalDirection.z) +
+                        glm::radians(90.0f);
+      const float roll = glm::radians(8.0f) *
+                         std::sin(localTime * 4.0f + static_cast<float>(i));
+      glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), yaw,
+                                       glm::vec3(0.0f, 1.0f, 0.0f));
+      rotation = glm::rotate(rotation, roll, glm::vec3(0.0f, 0.0f, 1.0f));
+      const float scale = 1.25f + 0.05f * static_cast<float>(i % 3);
+      flyingCrow.Wm = glm::translate(glm::mat4(1.0f), position) *
+                      rotation * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+    }
+  }
+
   void handleInteraction(bool interact, const glm::vec3 &forward) {
     bool firePressed = interact && !fireWasPressed;
     fireWasPressed = interact;
@@ -1403,6 +1505,8 @@ protected:
     handleInteraction(m.y > 0, forward);
 
     updatePotionAnimation(deltaT, forward, right);
+
+    updateCrowFlock(deltaT);
 
     checkEndCondition();
     

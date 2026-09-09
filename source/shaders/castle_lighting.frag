@@ -99,5 +99,15 @@ void main() {
     }
 
     vec3 litColor = ambient + diffuse + specular + pointLighting;
+
+    // A small distance-based exterior fog softens the flat ground horizon.
+    // Interior coordinates are around Y = 1000, so the effect stays outdoors.
+    if (scene.cameraPosition.y < 100.0) {
+        float distanceToCamera = length(scene.cameraPosition - worldPosition);
+        float fogAmount = smoothstep(45.0, 135.0, distanceToCamera) * 0.65;
+        vec3 fogColor = vec3(0.030, 0.055, 0.110);
+        litColor = mix(litColor, fogColor, fogAmount);
+    }
+
     finalFragmentColor = vec4(clamp(litColor, 0.0, 1.0), 1.0);
 }
