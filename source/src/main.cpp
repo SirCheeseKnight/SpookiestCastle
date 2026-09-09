@@ -1427,7 +1427,7 @@ protected:
     glm::vec3 walkForward = glm::normalize(glm::vec3(forward.x, 0.0f, forward.z));
     glm::vec3 walkRight   = glm::normalize(glm::vec3(right.x, 0.0f, right.z));
 
-    if (camPos.x < 2.0f && camPos.x > -2.0f &&  camPos.z <17.5 &&  camPos.z >17)
+    if (camPos.y < 1000.0f && camPos.x < 2.0f && camPos.x > -2.0f &&  camPos.z <17.7 &&  camPos.z >17.0)
     {
       camPos = glm::vec3(102.0f, 1014.0f, 92.0f);
     }
