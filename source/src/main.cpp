@@ -13,7 +13,7 @@
 #include "modules/TextMaker.hpp"
 #include "modules/Scene.hpp"
 
-constexpr int MAX_POINT_LIGHTS = 16;
+constexpr int MAX_POINT_LIGHTS = 32;
 
 // The uniform buffer object used in this example
 struct UniformBufferObject {
@@ -93,12 +93,15 @@ protected:
   float gravity = -19.6f;      // Downward acceleration (m/s^2)
   float jumpImpulse = 9.0f;    // Initial upward velocity when jumping
   float playerHeight = 2.5f; // Distance from player center to feet
+  float deathTime = 0.5f;
+  float floatingFactor = 0.0f;
   bool isGrounded = false;
   int graveIdCounter = 0;
   bool rockStart = false;
   bool rockStop = false;
   std::vector<float> ghostDirections;
   std::vector<float> ghostSpeeds;
+  std::vector<float> ghostDeathTimer;
   std::vector<float> initialGhostDirections;
   std::vector<bool> activeGhosts;
   std::vector<bool> brokenGraves;
@@ -118,7 +121,7 @@ protected:
   bool replayWasPressed = false;
   int remainingGhosts = 0;
   int spawnedGhosts = 0;
-  const float ghostRadius = 0.4f;
+  const float ghostRadius = 0.3f;
   glm::mat4 initialPotionTransform = glm::mat4(1.0f);
   Collider* initialPotionCollider;
 
@@ -355,6 +358,7 @@ protected:
         sceneData["instances"][1]["elements"].push_back(ghostInst);
 
         activeGhosts.push_back(false);
+        ghostDeathTimer.push_back(0.0f);
         ghostSpeeds.push_back(currSpeed(gen));
       }
     }
@@ -605,7 +609,7 @@ protected:
     // Check if the player is inside the castle/dungeon area (y > 1000.0f)
     if (camPos.y > 1000.0f) {
       // Dim the directional light heavily so it doesn't bleed through walls
-      gubo.lightColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.055f);
+      gubo.lightColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.005f);
     } else {
       // Moonlit exterior with less ambient fill than the interior
       gubo.lightColor = glm::vec4(0.55f * 0.50f,
@@ -690,16 +694,39 @@ protected:
     }
 
     // ghost pass
-    for(instanceId = 0; instanceId < SC.TI[1].InstanceCount; instanceId++) {
+    for (int i = 0; i < graveIdCounter; ++i) {
+      std::string ghostId = "ghost_auto_" + std::to_string(i);
+      if (!ghostIndexMap.count(ghostId)) {
+        continue;
+      }
+
+      int instanceId = ghostIndexMap[ghostId];
+
+      if (!activeGhosts[i] && ghostDeathTimer[i] > 0.0f)
+      {
+        ghostDeathTimer[i] = ghostDeathTimer[i] - deltaT;
+      }
+      else if (!activeGhosts[i])
+      {
+        SC.TI[1].I[instanceId].Wm = glm::scale(initialGhostTransforms[i], glm::vec3(0.0f));
+      }
+
       ubo.mMat = SC.TI[1].I[instanceId].Wm;
       ubo.mvpMat = ViewPrj * ubo.mMat;
-      float worldDeterminant = glm::determinant(ubo.mMat);
-      ubo.normalMat = glm::abs(worldDeterminant) > 0.000001f
-      ? glm::transpose(glm::inverse(ubo.mMat))
-      : glm::mat4(1.0f);
-      ubo.surfaceParams = glm::vec4(0.12f, 0.0f, 1.0f, 0.0f);
+     // float worldDeterminant = glm::determinant(ubo.mMat);
+     // ubo.normalMat = glm::abs(worldDeterminant) > 0.000001f
+     // ? glm::transpose(glm::inverse(ubo.mMat))
+     // : glm::mat4(1.0f);
 
-      // Map global and local parameters for the ghosts
+      float minY = -0.5f;
+      float maxY = 1.0f;
+
+      float currMinY = ghostDeathTimer[i] / deathTime * (minY - maxY + 0.5f) + maxY - 0.5f;
+
+      floatingFactor += deltaT;
+
+      ubo.surfaceParams = glm::vec4(floatingFactor * ghostSpeeds[i] / 6.0f, 0.0f, currMinY, 0.0f);
+
       SC.TI[1].I[instanceId].DS[0][0]->map(currentImage, &gubo, 0);
       SC.TI[1].I[instanceId].DS[0][1]->map(currentImage, &ubo, 0);
     }
@@ -731,7 +758,7 @@ protected:
       elapsedT = 0.0f;
       countedFrames = 0;
     }
-    
+
     txt.updateCommandBuffer();
   }
 
@@ -768,12 +795,10 @@ protected:
 
     // 3. Reset Active Ghosts vector
     std::fill(activeGhosts.begin(), activeGhosts.end(), false);
+    std::fill(ghostDeathTimer.begin(), ghostDeathTimer.end(), 0.0f);
     std::fill(brokenGraves.begin(), brokenGraves.end(), false);
     std::fill(collisionDisabled.begin(), collisionDisabled.end(), false);
     ghostDirections = initialGhostDirections;
-
-    // 4. Reset Ghost Directions if you added direction tracking
-    // std::fill(ghostDirections.begin(), ghostDirections.end(), 1.0f);
 
     // 5. Restore Grave, Broken Grave, and Ghost World Matrices
     for (int i = 0; i < graveIdCounter; ++i) {
@@ -889,6 +914,7 @@ protected:
         if (mainGrave.C != nullptr && rockCol.collidesWith(*(mainGrave.C))) {
           brokenGraves[i] = true;
           activeGhosts[i] = true;
+          ghostDeathTimer[i] = deathTime;
           remainingGhosts++;
           spawnedGhosts++;
 
@@ -1017,7 +1043,7 @@ protected:
     const float ghostPosMin = 77.5f;
 
     for (int i = 0; i < graveIdCounter; ++i) {
-      if (i < activeGhosts.size() && activeGhosts[i]) {
+      if (i < activeGhosts.size() && (activeGhosts[i] || ghostDeathTimer[i] > 0.0f)) {
         std::string ghostId = "ghost_auto_" + std::to_string(i);
 
         if (ghostIndexMap.count(ghostId)) {
@@ -1031,7 +1057,7 @@ protected:
           Collider ghostCol;
           ghostCol.initSphere(pos.x, pos.y, pos.z, ghostRadius);
 
-          if (ghostCol.collidesWith(playerCol))
+          if (activeGhosts[i] && ghostCol.collidesWith(playerCol))
           {
             resetGame();
             return;
@@ -1127,7 +1153,7 @@ protected:
 
             glm::vec3 pos = glm::vec3(ghost.Wm[3]);
             Collider ghostCol;
-            ghostCol.initSphere(pos.x, pos.y, pos.z, ghostRadius);
+            ghostCol.initSphere(pos.x, pos.y, pos.z, ghostRadius * 3.5f);
 
             if (ghostCol.collidesWith(rayPoint))
             {
@@ -1282,8 +1308,8 @@ protected:
           activeGhosts[ghostIdNum] && ghostIndexMap.count(sightHit.objectId)) {
         int ghostIdx = ghostIndexMap[sightHit.objectId];
         activeGhosts[ghostIdNum] = false;
-        SC.TI[1].I[ghostIdx].Wm =
-            glm::scale(initialGhostTransforms[ghostIdNum], glm::vec3(0.0f));
+        //SC.TI[1].I[ghostIdx].Wm =
+        //    glm::scale(initialGhostTransforms[ghostIdNum], glm::vec3(0.0f));
         remainingGhosts--;
       }
     }

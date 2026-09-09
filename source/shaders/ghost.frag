@@ -4,10 +4,16 @@ layout(location = 0) in float vLocalY;
 layout(location = 1) in vec2 vUV;
 layout(location = 0) out vec4 FragColor;
 
+layout(set = 1, binding = 0) uniform UniformBufferObject {
+    mat4 uModelViewProjection;
+    mat4 mMat;
+    mat4 normalMat;
+    vec4 surfaceParams;
+} ubo;
 layout(set = 1, binding = 1) uniform sampler2D texSampler;
 
 void main() {
-    float minY = -0.5;
+    float minY = ubo.surfaceParams.z;
     float maxY =  1.0;
 
     float normalizedHeight = (vLocalY - minY) / (maxY - minY);
@@ -16,7 +22,7 @@ void main() {
 
     vec4 texColor = texture(texSampler, vUV);
     vec3 finalRgb = texColor.rgb * vec3(0.5, 0.8, 1.2);
-    float finalAlpha = texColor.a * alphaMultiplier * 0.85;
+    float finalAlpha = texColor.a * alphaMultiplier * 0.7;
 
     if (finalAlpha < 0.01) {
         discard;

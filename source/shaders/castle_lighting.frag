@@ -1,6 +1,6 @@
 #version 450
 
-const int MAX_POINT_LIGHTS = 16;
+const int MAX_POINT_LIGHTS = 32;
 const float SHININESS = 48.0;
 
 layout(location = 0) in vec3 worldPosition;
@@ -61,7 +61,7 @@ vec3 pointLightContribution(int lightIndex, vec3 albedo,
     }
 
     float attenuation = 1.0 /
-        (1.0 + 0.12 * lightDistance + 0.045 * lightDistance * lightDistance);
+        (2.5 + 0.24 * lightDistance + 0.095 * lightDistance * lightDistance);
     vec3 lightColor = scene.pointLightColors[lightIndex].rgb;
 
     vec3 diffuse = albedo * diffuseAmount * lightColor;
